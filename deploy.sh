@@ -1,47 +1,38 @@
 #!/bin/bash
-# Deployment script for Media Ingest Dashboard on Debian server
+# Local deployment script for Media Ingest Dashboard
+# Run this after pulling from git on the server
 
 set -e
 
-SERVER_USER="root"
-SERVER_HOST="192.168.1.24"
-DEPLOY_PATH="/opt/mediaingest-dashboard"
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 SERVICE_NAME="mediaingest-dashboard"
 
-echo "🚀 Deploying Media Ingest Dashboard to $SERVER_HOST..."
+echo "🚀 Building Media Ingest Dashboard..."
 
 # Build the frontend
 echo "📦 Building frontend..."
-cd client
+cd "$SCRIPT_DIR/client"
+npm install
 npm run build
-cd ..
+cd "$SCRIPT_DIR"
 
-# Create deployment directory on server
-echo "📁 Creating deployment directory..."
-ssh $SERVER_USER@$SERVER_HOST "mkdir -p $DEPLOY_PATH"
+# Install backend dependencies
+echo "📥 Installing backend dependencies..."
+npm install --production
 
-# Copy files to server
-echo "📤 Copying files to server..."
-rsync -avz --exclude 'node_modules' --exclude 'client/node_modules' --exclude '.git' \
-  --exclude 'client/src' --exclude 'client/public' \
-  ./ $SERVER_USER@$SERVER_HOST:$DEPLOY_PATH/
-
-# Install dependencies on server
-echo "📥 Installing dependencies on server..."
-ssh $SERVER_USER@$SERVER_HOST "cd $DEPLOY_PATH && npm install --production"
-
-# Create systemd service
-echo "⚙️  Creating systemd service..."
-ssh $SERVER_USER@$SERVER_HOST "cat > /etc/systemd/system/$SERVICE_NAME.service" << 'EOF'
+# Create systemd service if it doesn't exist
+if [ ! -f "/etc/systemd/system/$SERVICE_NAME.service" ]; then
+  echo "⚙️  Creating systemd service..."
+  sudo tee /etc/systemd/system/$SERVICE_NAME.service > /dev/null << EOF
 [Unit]
 Description=Media Ingest Dashboard
 After=network.target
 
 [Service]
 Type=simple
-User=root
-WorkingDirectory=/opt/mediaingest-dashboard
-ExecStart=/usr/bin/node /opt/mediaingest-dashboard/server.js
+User=$USER
+WorkingDirectory=$SCRIPT_DIR
+ExecStart=$(which node) $SCRIPT_DIR/server.js
 Restart=always
 RestartSec=10
 Environment=NODE_ENV=production
@@ -51,18 +42,26 @@ Environment=PORT=3000
 WantedBy=multi-user.target
 EOF
 
-# Reload systemd and start service
-echo "🔄 Reloading systemd and starting service..."
-ssh $SERVER_USER@$SERVER_HOST "systemctl daemon-reload && systemctl enable $SERVICE_NAME && systemctl restart $SERVICE_NAME"
+  sudo systemctl daemon-reload
+  sudo systemctl enable $SERVICE_NAME
+fi
+
+# Restart service
+echo "🔄 Restarting service..."
+sudo systemctl restart $SERVICE_NAME
 
 # Check status
-echo "✅ Deployment complete! Checking service status..."
-ssh $SERVER_USER@$SERVER_HOST "systemctl status $SERVICE_NAME --no-pager"
-
-echo ""
-echo "🎉 Dashboard should be accessible at http://$SERVER_HOST:3000"
-echo ""
-echo "Useful commands:"
-echo "  View logs: ssh $SERVER_USER@$SERVER_HOST 'journalctl -u $SERVICE_NAME -f'"
-echo "  Restart: ssh $SERVER_USER@$SERVER_HOST 'systemctl restart $SERVICE_NAME'"
-echo "  Stop: ssh $SERVER_USER@$SERVER_HOST 'systemctl stop $SERVICE_NAME'"
+sleep 2
+if sudo systemctl is-active --quiet $SERVICE_NAME; then
+  echo ""
+  echo "✅ Dashboard successfully deployed and running!"
+  echo "📍 Access at: http://$(hostname -I | awk '{print $1}'):3000"
+  echo ""
+  echo "📊 Service status:"
+  sudo systemctl status $SERVICE_NAME --no-pager -l
+else
+  echo ""
+  echo "❌ Service failed to start. Check logs:"
+  echo "   sudo journalctl -u $SERVICE_NAME -n 50"
+  exit 1
+fi
