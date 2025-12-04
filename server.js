@@ -88,9 +88,21 @@ function parseCurrentTransfer(logLines) {
   let timeRemaining = null;
   let size = null;
   
+  // Check if last line indicates completion
+  const lastLines = logLines.slice(-10).join('\n');
+  if (lastLines.includes('Ingest Complete') || lastLines.includes('sent ') && lastLines.includes('bytes/sec')) {
+    // Transfer session completed, no active transfer
+    return { filename: null, progress: 0, speed: null, timeRemaining: null, size: null };
+  }
+  
   // Parse from end backwards for most recent transfer
   for (let i = logLines.length - 1; i >= 0; i--) {
     const line = logLines[i].trim();
+    
+    // Stop if we hit a completion marker
+    if (line.includes('Ingest Complete') || (line.includes('sent ') && line.includes('bytes/sec'))) {
+      break;
+    }
     
     // Match progress line (not 100%)
     const progressMatch = line.match(/([\d.]+[KMGT]?)\s+(\d+)%\s+([\d.]+[KMGT]?B\/s)\s+(\d+:\d+:\d+)/);
