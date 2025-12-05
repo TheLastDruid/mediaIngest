@@ -41,15 +41,26 @@ function parseNewCompletedTransfers(newLines) {
   for (let i = 0; i < newLines.length; i++) {
     const line = newLines[i].trim();
     
-    // Match the 100% completion line: "filename.mp4   1.77G 100%   62.63MB/s    0:00:27"
-    const completionMatch = line.match(/\.mp4\s+([\d.]+[KMGT]?)\s+100%\s+([\d.]+[KMGT]?B\/s)\s+(\d+:\d+:\d+)/i);
+    // Match 100% completion line: "1.77G 100%   58.48MB/s    0:00:28 (xfr#2, to-chk=0/13)"
+    const completionMatch = line.match(/([\d.]+[KMGT]?)\s+100%\s+([\d.]+[KMGT]?B\/s)\s+(\d+:\d+:\d+)/);
     
     if (completionMatch) {
-      // Extract filename from the same line (before the size)
-      const filenameMatch = line.match(/([^\/]+\.mp4)/i);
+      // Look backwards for the filename on previous line(s)
+      let filename = null;
       
-      if (filenameMatch) {
-        const filename = filenameMatch[1].trim();
+      for (let j = i - 1; j >= Math.max(0, i - 5); j--) {
+        const prevLine = newLines[j].trim();
+        
+        // Match common video/media file extensions
+        const fileMatch = prevLine.match(/([^\/]+\.(mp4|mkv|avi|mov|m4v|webm|flv|wmv|mpg|mpeg|m2ts))$/i);
+        
+        if (fileMatch) {
+          filename = fileMatch[1];
+          break;
+        }
+      }
+      
+      if (filename) {
         const size = completionMatch[1];
         const speed = completionMatch[2];
         const time = completionMatch[3];
