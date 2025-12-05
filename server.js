@@ -89,6 +89,19 @@ function parseCurrentTransfer(logLines) {
     return { filename: null, progress: 0, speed: null, timeRemaining: null, size: null };
   }
   
+  // Check if we're in an active sync (look for "Syncing" or "sending incremental")
+  let inActiveSync = false;
+  for (let i = logLines.length - 1; i >= Math.max(0, logLines.length - 50); i--) {
+    if (logLines[i].includes('Syncing ') || logLines[i].includes('sending incremental')) {
+      inActiveSync = true;
+      break;
+    }
+  }
+  
+  if (!inActiveSync) {
+    return { filename: null, progress: 0, speed: null, timeRemaining: null, size: null };
+  }
+  
   // Parse from end backwards for most recent transfer
   for (let i = logLines.length - 1; i >= 0; i--) {
     const line = logLines[i].trim();
@@ -98,25 +111,45 @@ function parseCurrentTransfer(logLines) {
       break;
     }
     
-    // Match progress line (not 100%)
+    // Match progress line: size percentage speed time (with optional xfr# and to-chk info)
+    // Example: 1.77G 100%   58.48MB/s    0:00:28 (xfr#2, to-chk=0/13)
     const progressMatch = line.match(/([\d.]+[KMGT]?)\s+(\d+)%\s+([\d.]+[KMGT]?B\/s)\s+(\d+:\d+:\d+)/);
     
-    if (progressMatch && parseInt(progressMatch[2]) < 100) {
+    if (progressMatch) {
+      const matchedProgress = parseInt(progressMatch[2]);
+      
+      // Skip if 100% (completed transfers)
+      if (matchedProgress >= 100) continue;
+      
       size = progressMatch[1];
-      progress = parseInt(progressMatch[2]);
+      progress = matchedProgress;
       speed = progressMatch[3];
       timeRemaining = progressMatch[4];
       
-      // Look backwards for filename
+      // Look backwards for filename (rsync prints filename on previous line)
       for (let j = i - 1; j >= 0; j--) {
         const prevLine = logLines[j].trim();
-        if (prevLine && prevLine.match(/\.(mp4|mkv|avi|mov|m4v|webm)$/i)) {
-          currentFilename = prevLine.replace(/^.*\//, '');
+        
+        // Match common video/media file extensions
+        if (prevLine && prevLine.match(/\.(mp4|mkv|avi|mov|m4v|webm|flv|wmv|mpg|mpeg|m2ts)$/i)) {
+          currentFilename = prevLine.replace(/^.*\//, ''); // Remove path, keep filename only
           break;
         }
       }
       
       if (currentFilename) break;
+    }
+  }
+  
+  // If we're in active sync but found no current file progress, look for most recent filename
+  if (inActiveSync && !currentFilename) {
+    for (let i = logLines.length - 1; i >= Math.max(0, logLines.length - 100); i--) {
+      const line = logLines[i].trim();
+      if (line && line.match(/\.(mp4|mkv|avi|mov|m4v|webm|flv|wmv|mpg|mpeg|m2ts)$/i)) {
+        currentFilename = line.replace(/^.*\//, '');
+        progress = 0; // Starting transfer
+        break;
+      }
     }
   }
   
