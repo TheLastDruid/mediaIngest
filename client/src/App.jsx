@@ -85,7 +85,7 @@ function ActiveTransferCard({ current, onAbort }) {
       <div>
         <div className="mb-4 sm:mb-5">
           <h3 className="text-xl sm:text-2xl lg:text-3xl font-bold text-white mb-2 truncate">
-            {current.filename}
+            {current.filename || 'Preparing transfer...'}
           </h3>
           <p className="text-xs sm:text-sm text-slate-500">Media file transfer in progress</p>
         </div>
@@ -94,12 +94,12 @@ function ActiveTransferCard({ current, onAbort }) {
         <div className="mb-5 sm:mb-6">
           <div className="flex justify-between items-center mb-2">
             <span className="text-xs uppercase tracking-wide text-slate-500">Progress</span>
-            <span className="text-base sm:text-lg font-bold text-blue-400">{current.progress}%</span>
+            <span className="text-base sm:text-lg font-bold text-blue-400">{current.progress || 0}%</span>
           </div>
           <div className="h-4 sm:h-3 bg-slate-950 rounded-full overflow-hidden border border-slate-800 touch-manipulation">
             <motion.div
               className="h-full bg-gradient-to-r from-blue-600 to-blue-500"
-              animate={{ width: `${current.progress}%` }}
+              animate={{ width: `${current.progress || 0}%` }}
               transition={{ duration: 0.1, ease: "linear" }}
             />
           </div>
@@ -501,7 +501,8 @@ export default function App() {
     }
   }, [])
 
-  const hasTransfer = active && current.filename
+  // Show active transfer card if sync is active, even if filename isn't available yet
+  const hasTransfer = active
 
   return (
     <div className="min-h-screen bg-slate-950 p-4 sm:p-6">
