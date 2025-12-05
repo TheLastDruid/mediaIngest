@@ -34,45 +34,39 @@ function writeHistory(history) {
   fs.writeFileSync(HISTORY_PATH, JSON.stringify(history, null, 2));
 }
 
-// Parse log and extract completed transfers
-function parseLogForCompleted(logLines) {
+// Parse log and extract completed transfers from new lines only
+function parseNewCompletedTransfers(newLines) {
   const completed = [];
-  let currentFilename = null;
   
-  for (let i = 0; i < logLines.length; i++) {
-    const line = logLines[i].trim();
+  for (let i = 0; i < newLines.length; i++) {
+    const line = newLines[i].trim();
     
-    // Match progress line at 100%
-    const progressMatch = line.match(/([\d.]+[KMGT]?)\s+100%\s+([\d.]+[KMGT]?B\/s)\s+(\d+:\d+:\d+)/);
+    // Match the 100% completion line: "filename.mp4   1.77G 100%   62.63MB/s    0:00:27"
+    const completionMatch = line.match(/\.mp4\s+([\d.]+[KMGT]?)\s+100%\s+([\d.]+[KMGT]?B\/s)\s+(\d+:\d+:\d+)/i);
     
-    if (progressMatch) {
-      const size = progressMatch[1];
-      const speed = progressMatch[3];
+    if (completionMatch) {
+      // Extract filename from the same line (before the size)
+      const filenameMatch = line.match(/([^\/]+\.mp4)/i);
       
-      // Look backwards for filename
-      for (let j = i - 1; j >= 0; j--) {
-        const prevLine = logLines[j].trim();
-        if (prevLine && prevLine.match(/\.(mp4|mkv|avi|mov|m4v|webm)$/i)) {
-          currentFilename = prevLine.replace(/^.*\//, '');
-          break;
-        }
-      }
-      
-      if (currentFilename) {
+      if (filenameMatch) {
+        const filename = filenameMatch[1].trim();
+        const size = completionMatch[1];
+        const speed = completionMatch[2];
+        const time = completionMatch[3];
+        
         // Determine type (Movie vs Series)
         let type = 'Movie';
-        if (currentFilename.match(/S\d{2}E\d{2}|Season|Episode/i)) {
+        if (filename.match(/S\d{2}E\d{2}|Season|Episode/i)) {
           type = 'Series';
         }
         
         completed.push({
-          filename: currentFilename,
+          filename,
           size,
           speed,
           type,
           timestamp: Date.now()
         });
-        currentFilename = null;
       }
     }
   }
@@ -129,44 +123,61 @@ function parseCurrentTransfer(logLines) {
   return { filename: currentFilename, progress, speed, timeRemaining, size };
 }
 
-// Watch log file and update history
+// Watch log file and update history (only process new lines)
+let lastFileSize = 0;
+let lastPosition = 0;
+
 function watchLogFile() {
-  let lastKnownFiles = new Set();
-  
   setInterval(() => {
-    fs.readFile(LOG_PATH, 'utf8', (err, data) => {
+    fs.stat(LOG_PATH, (err, stats) => {
       if (err) return;
       
-      const lines = data.split(/\r?\n/).filter(line => line.trim());
-      const completed = parseLogForCompleted(lines);
-      
-      if (completed.length > 0) {
-        const history = readHistory();
-        
-        completed.forEach(transfer => {
-          const fileKey = `${transfer.filename}_${transfer.timestamp}`;
-          
-          // Only add if not already recorded (within 10 seconds)
-          const exists = history.transfers.some(t => 
-            t.filename === transfer.filename && 
-            Math.abs(t.timestamp - transfer.timestamp) < 10000
-          );
-          
-          if (!exists && !lastKnownFiles.has(transfer.filename)) {
-            history.transfers.push(transfer);
-            lastKnownFiles.add(transfer.filename);
-            
-            // Clean up old entries from Set after 30 seconds
-            setTimeout(() => lastKnownFiles.delete(transfer.filename), 30000);
-          }
+      // Only process if file has grown
+      if (stats.size > lastFileSize) {
+        const stream = fs.createReadStream(LOG_PATH, {
+          start: lastPosition,
+          encoding: 'utf8'
         });
         
-        // Keep only last 100 transfers
-        if (history.transfers.length > 100) {
-          history.transfers = history.transfers.slice(-100);
-        }
+        let buffer = '';
         
-        writeHistory(history);
+        stream.on('data', (chunk) => {
+          buffer += chunk;
+        });
+        
+        stream.on('end', () => {
+          const newLines = buffer.split(/\r?\n/).filter(line => line.trim());
+          const completed = parseNewCompletedTransfers(newLines);
+          
+          if (completed.length > 0) {
+            const history = readHistory();
+            
+            completed.forEach(transfer => {
+              // Only add if not duplicate (check last 10 entries)
+              const isDuplicate = history.transfers.slice(-10).some(t => 
+                t.filename === transfer.filename
+              );
+              
+              if (!isDuplicate) {
+                history.transfers.push(transfer);
+              }
+            });
+            
+            // Keep only last 100 transfers
+            if (history.transfers.length > 100) {
+              history.transfers = history.transfers.slice(-100);
+            }
+            
+            writeHistory(history);
+          }
+          
+          lastPosition = stats.size;
+          lastFileSize = stats.size;
+        });
+      } else if (stats.size < lastFileSize) {
+        // Log was rotated/cleared, reset position
+        lastPosition = 0;
+        lastFileSize = stats.size;
       }
     });
   }, 2000); // Check every 2 seconds
