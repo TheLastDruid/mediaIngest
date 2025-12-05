@@ -14,7 +14,7 @@
 
 [Features](#-features) • [Quick Start](#-quick-start) • [How It Works](#️-how-it-works) • [Screenshots](#-screenshots) • [Contributing](#-contributing)
 
-![Dashboard Preview](https://via.placeholder.com/1200x600/1e293b/ffffff?text=Dashboard+Screenshot+Coming+Soon)
+![Dashboard Preview](screenshots/dashboard-desktop.png)
 
 </div>
 
@@ -232,13 +232,21 @@ rsync -rvhc -W --inplace --progress --ignore-existing  # Add checksums
 ## 📸 Screenshots
 
 ### Desktop View
-![Desktop Dashboard](https://via.placeholder.com/1200x600/1e293b/ffffff?text=Desktop+View+-+Bento+Grid+Dashboard)
+![Desktop Dashboard](screenshots/dashboard-desktop.png)
+*Full-featured Bento Grid dashboard with statistics, storage health, device controls, and transfer history*
 
 ### Mobile View
-![Mobile Dashboard](https://via.placeholder.com/600x1200/1e293b/ffffff?text=Mobile+View+-+Responsive+Design)
+<img src="screenshots/dashboard-mobile.png" width="400" alt="Mobile Dashboard">
 
-### Live Transfer
-![Live Transfer](https://via.placeholder.com/1200x600/1e293b/ffffff?text=Real-Time+rsync+Progress)
+*Fully responsive mobile interface - monitor transfers from anywhere*
+
+### Key Features Shown
+- ✅ Real-time transfer statistics (100 files, 141.37 GB transferred)
+- ✅ Storage health monitoring (NAS 12% used, USB 16% used)
+- ✅ Device controls (Samsung T7 Shield detected with Eject/Scan buttons)
+- ✅ Complete transfer history with timestamps and status indicators
+- ✅ Dark mode optimized UI with modern Bento Grid layout
+- ✅ Smooth animations and professional design
 
 ---
 
