@@ -141,9 +141,33 @@ ensure_template() {
     fi
     
     msg_info "Downloading Debian 12 template (this may take a few minutes)"
-    pveam update >/dev/null 2>&1
-    pveam download local $TEMPLATE >/dev/null 2>&1
-    msg_ok "Template downloaded"
+    msg_info "Updating template list..."
+    if ! pveam update 2>&1 | tee /tmp/pveam-update.log | grep -q "update successful\|download list successful"; then
+        msg_warn "Template list update had issues, continuing..."
+    fi
+    
+    msg_info "Downloading template: $TEMPLATE"
+    echo -e "${BL}[INFO]${CL} This may take 2-5 minutes depending on your connection..."
+    
+    if pveam download local "$TEMPLATE" 2>&1 | tee /tmp/pveam-download.log; then
+        msg_ok "Template downloaded successfully"
+    else
+        msg_error "Template download failed"
+        echo -e "\n${YW}Debug Information:${CL}"
+        echo "Template: $TEMPLATE"
+        echo "Storage: local"
+        echo ""
+        echo "Download log:"
+        cat /tmp/pveam-download.log 2>/dev/null || echo "No log available"
+        echo ""
+        echo -e "${YW}Troubleshooting:${CL}"
+        echo "1. Check internet connectivity: ping -c 3 download.proxmox.com"
+        echo "2. Verify storage 'local' exists: pvesm status"
+        echo "3. List available templates: pveam available | grep debian-12"
+        echo "4. Manual download: pveam download local $TEMPLATE"
+        echo ""
+        exit 1
+    fi
 }
 
 prepare_nas_path() {
