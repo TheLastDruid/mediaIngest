@@ -5,6 +5,7 @@ const path = require('path');
 const { exec } = require('child_process');
 
 const LOG_PATH = '/var/log/media-ingest.log';
+const PROGRESS_LOG_PATH = '/var/log/media-ingest-progress.log';
 const HISTORY_PATH = path.join(__dirname, 'history.json');
 const PORT = process.env.PORT || 3000;
 
@@ -85,8 +86,89 @@ function parseNewCompletedTransfers(newLines) {
   return completed;
 }
 
-// Parse log for current transfer status
-function parseCurrentTransfer(logLines) {
+// Parse progress log for current transfer status (reads progress log for real-time updates)
+function parseCurrentTransfer() {
+  let currentFilename = null;
+  let progress = 0;
+  let speed = null;
+  let timeRemaining = null;
+  let size = null;
+  
+  // Read progress log if it exists
+  if (!fs.existsSync(PROGRESS_LOG_PATH)) {
+    return { filename: null, progress: 0, speed: null, timeRemaining: null, size: null };
+  }
+  
+  const progressContent = fs.readFileSync(PROGRESS_LOG_PATH, 'utf8');
+  const progressLines = progressContent.split('\n').filter(line => line.trim());
+  
+  if (progressLines.length === 0) {
+    return { filename: null, progress: 0, speed: null, timeRemaining: null, size: null };
+  }
+  
+  // Check if sync is active
+  let inActiveSync = false;
+  for (const line of progressLines) {
+    if (line.startsWith('SYNC_START:')) {
+      inActiveSync = true;
+    }
+    if (line.startsWith('SYNC_END:')) {
+      inActiveSync = false;
+    }
+  }
+  
+  if (!inActiveSync) {
+    return { filename: null, progress: 0, speed: null, timeRemaining: null, size: null };
+  }
+  
+  // Parse from end backwards for most recent transfer
+  for (let i = progressLines.length - 1; i >= 0; i--) {
+    const line = progressLines[i].trim();
+    
+    // Match progress line with percentage
+    const progressMatch = line.match(/([\d.]+[KMGT]?)\s+(\d+)%\s+([\d.]+[KMGT]?B\/s)\s+(\d+:\d+:\d+)/);
+    
+    if (progressMatch) {
+      const matchedProgress = parseInt(progressMatch[2]);
+      
+      // Skip if 100% completion
+      if (matchedProgress >= 100 && line.includes('to-chk=0/')) continue;
+      
+      size = progressMatch[1];
+      progress = matchedProgress;
+      speed = progressMatch[3];
+      timeRemaining = progressMatch[4];
+      
+      // Look backwards for filename
+      for (let j = i - 1; j >= Math.max(0, i - 10); j--) {
+        const prevLine = progressLines[j].trim();
+        
+        if (prevLine && prevLine.match(/\.(mp4|mkv|avi|mov|m4v|webm|flv|wmv|mpg|mpeg|m2ts)$/i)) {
+          currentFilename = prevLine.replace(/^.*\//, '');
+          break;
+        }
+      }
+      
+      if (currentFilename || progress > 0) break;
+    }
+  }
+  
+  // If we're in active sync but found no progress, look for most recent filename
+  if (inActiveSync && !currentFilename && progress === 0) {
+    for (let i = progressLines.length - 1; i >= Math.max(0, progressLines.length - 50); i--) {
+      const line = progressLines[i].trim();
+      if (line && line.match(/\.(mp4|mkv|avi|mov|m4v|webm|flv|wmv|mpg|mpeg|m2ts)$/i)) {
+        currentFilename = line.replace(/^.*\//, '');
+        break;
+      }
+    }
+  }
+  
+  return { filename: currentFilename, progress, speed, timeRemaining, size };
+}
+
+// Parse main log for current transfer status (fallback if progress log doesn't exist)
+function parseCurrentTransferFromMainLog(logLines) {
   let currentFilename = null;
   let progress = 0;
   let speed = null;
@@ -242,17 +324,12 @@ function watchLogFile() {
 
 // API: Get current status
 app.get('/api/status', (req, res) => {
-  fs.readFile(LOG_PATH, 'utf8', (err, data) => {
-    if (err) {
-      return res.json({ ok: false, active: false, current: null });
-    }
-    
-    const lines = data.split(/\r?\n/).filter(line => line.trim());
-    const current = parseCurrentTransfer(lines);
-    const active = current.filename !== null;
-    
-    res.json({ ok: true, active, current });
-  });
+  // Use progress log for real-time updates
+  const current = parseCurrentTransfer();
+  const active = current.filename !== null;
+  
+  res.json({ ok: true, active, current });
+});
 });
 
 // API: Get history
