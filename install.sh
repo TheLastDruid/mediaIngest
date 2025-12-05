@@ -291,7 +291,7 @@ fi
 echo "$(date): USB Device Detected: $DEVICE (kernel: $KERNEL_DEVICE)" >> /var/log/usb-trigger.log
 
 # Wait for device to be fully ready
-sleep 3
+sleep 2
 
 # Create mount point if needed
 mkdir -p "$HOST_MOUNT"

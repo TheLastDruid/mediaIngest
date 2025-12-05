@@ -336,7 +336,7 @@ function watchLogFile() {
         lastFileSize = stats.size;
       }
     });
-  }, 2000); // Check every 2 seconds
+  }, 1000); // Check every 1 second for faster response
 }
 
 // API: Get current status
