@@ -100,7 +100,10 @@ function parseCurrentTransfer() {
   }
   
   const progressContent = fs.readFileSync(PROGRESS_LOG_PATH, 'utf8');
-  const progressLines = progressContent.split('\n').filter(line => line.trim());
+  const allLines = progressContent.split('\n').filter(line => line.trim());
+  
+  // Only look at the last 100 lines for current transfer (performance + accuracy)
+  const progressLines = allLines.slice(-100);
   
   if (progressLines.length === 0) {
     return { filename: null, progress: 0, speed: null, timeRemaining: null, size: null };
