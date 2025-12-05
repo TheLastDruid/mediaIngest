@@ -316,13 +316,30 @@ app.post('/api/eject', (req, res) => {
 
 // Scan Jellyfin library
 app.post('/api/scan', (req, res) => {
-  // Replace with your actual Jellyfin scan command
-  exec('curl -X POST "http://localhost:8096/Library/Refresh" -H "X-Emby-Token: YOUR_API_KEY"', (err) => {
+  // Option 1: Create a trigger file that your Jellyfin scan script monitors
+  exec('touch /tmp/jellyfin-scan-trigger', (err) => {
+    if (err) {
+      return res.json({ ok: false, error: 'Failed to trigger library scan' });
+    }
+    res.json({ ok: true, message: 'Library scan triggered' });
+  });
+  
+  // Option 2: If you have Jellyfin API configured, uncomment this:
+  /*
+  const JELLYFIN_URL = process.env.JELLYFIN_URL || 'http://localhost:8096';
+  const JELLYFIN_API_KEY = process.env.JELLYFIN_API_KEY || '';
+  
+  if (!JELLYFIN_API_KEY) {
+    return res.json({ ok: true, message: 'Scan trigger created (configure JELLYFIN_API_KEY for direct scan)' });
+  }
+  
+  exec(`curl -s -X POST "${JELLYFIN_URL}/Library/Refresh" -H "X-Emby-Token: ${JELLYFIN_API_KEY}"`, (err, stdout, stderr) => {
     if (err) {
       return res.json({ ok: false, error: 'Failed to trigger library scan' });
     }
     res.json({ ok: true, message: 'Library scan initiated' });
   });
+  */
 });
 
 // Serve static files from client/dist
