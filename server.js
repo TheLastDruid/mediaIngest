@@ -304,6 +304,27 @@ app.get('/api/storage', (req, res) => {
   });
 });
 
+// Eject USB drive
+app.post('/api/eject', (req, res) => {
+  exec('umount /media/usb-ingest', (err) => {
+    if (err) {
+      return res.json({ ok: false, error: 'Failed to unmount drive' });
+    }
+    res.json({ ok: true, message: 'Drive unmounted successfully' });
+  });
+});
+
+// Scan Jellyfin library
+app.post('/api/scan', (req, res) => {
+  // Replace with your actual Jellyfin scan command
+  exec('curl -X POST "http://localhost:8096/Library/Refresh" -H "X-Emby-Token: YOUR_API_KEY"', (err) => {
+    if (err) {
+      return res.json({ ok: false, error: 'Failed to trigger library scan' });
+    }
+    res.json({ ok: true, message: 'Library scan initiated' });
+  });
+});
+
 // Serve static files from client/dist
 const clientDist = path.join(__dirname, 'client', 'dist');
 if (fs.existsSync(clientDist)) {
