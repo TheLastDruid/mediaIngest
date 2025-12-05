@@ -136,7 +136,8 @@ ensure_template() {
     
     # Check if any Debian 12 template already exists
     if pveam list local 2>/dev/null | grep -q "debian-12"; then
-        TEMPLATE=$(pveam list local | grep "debian-12" | head -1 | awk '{print $2}')
+        # Format: local:vztmpl/debian-12-standard_12.2-1_amd64.tar.zst  SIZE  DATE
+        TEMPLATE=$(pveam list local | grep "debian-12" | head -1 | sed 's/.*vztmpl\///' | awk '{print $1}')
         msg_ok "Template found: $TEMPLATE"
         return
     fi
@@ -150,7 +151,8 @@ ensure_template() {
     
     # Auto-detect the latest available Debian 12 template
     msg_info "Detecting latest Debian 12 template..."
-    TEMPLATE=$(pveam available | grep "debian-12-standard" | grep "amd64" | tail -1 | awk '{print $2}')
+    # Format: system  debian-12-standard_12.2-1_amd64.tar.zst  SIZE  SECTION
+    TEMPLATE=$(pveam available | grep "debian-12-standard" | grep "amd64" | tail -1 | awk '{print $1}')
     
     if [ -z "$TEMPLATE" ]; then
         msg_error "No Debian 12 template found in repository"
