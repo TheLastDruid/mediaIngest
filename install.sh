@@ -623,12 +623,19 @@ show_summary() {
     
     echo -e "\n${GN}════════════════════════════════════════════════════════════════${CL}"
     echo -e "${GN}               Installation Complete! 🎉${CL}"
+    echo -e "${GN}════════════════════════════════════════════════════════════════${CL}"
+    echo -e "${BL}                  Developed by Spooky Funck${CL}"
     echo -e "${GN}════════════════════════════════════════════════════════════════${CL}\n"
     
     echo -e "${BL}Container Information:${CL}"
     echo -e "  ID: ${GN}$CTID${CL}"
     echo -e "  Name: ${GN}$CT_NAME${CL}"
     echo -e "  IP: ${GN}$CT_IP${CL}"
+    
+    echo -e "\n${BL}LXC Login Credentials:${CL}"
+    echo -e "  Username: ${GN}root${CL}"
+    echo -e "  Password: ${GN}mediaingest123${CL}"
+    echo -e "  SSH: ${YW}ssh root@$CT_IP${CL}"
     
     echo -e "\n${BL}Dashboard Access:${CL}"
     echo -e "  ${GN}http://$CT_IP:3000${CL}"
