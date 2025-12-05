@@ -371,8 +371,12 @@ bootstrap_container() {
     msg_ok "Log file created"
     
     msg_info "Deploying ingest script"
-    pct push $CTID "$(dirname "$0")/scripts/ingest-media.sh" /usr/local/bin/ingest-media.sh 2>/dev/null || \
-    pct exec $CTID -- bash -c 'cat > /usr/local/bin/ingest-media.sh << '\''EOFSCRIPT'\''
+    
+    # Try to push from local scripts directory, or create inline
+    if [ -f "$(dirname "$0")/scripts/ingest-media.sh" ]; then
+        pct push $CTID "$(dirname "$0")/scripts/ingest-media.sh" /usr/local/bin/ingest-media.sh
+    else
+        pct exec $CTID -- bash -c 'cat > /usr/local/bin/ingest-media.sh << '\''EOFSCRIPT'\''
 #!/bin/bash
 
 SEARCH_ROOT="/media/usb-ingest"
@@ -415,6 +419,7 @@ sync_folder "Anime"
 
 echo "$(date): Ingest Complete." >> "$LOG"
 EOFSCRIPT'
+    fi
     
     pct exec $CTID -- chmod +x /usr/local/bin/ingest-media.sh
     msg_ok "Ingest script deployed"
