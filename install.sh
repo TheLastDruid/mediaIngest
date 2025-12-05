@@ -333,6 +333,12 @@ EOFSCRIPT
     msg_ok "Mount point /mnt/usb-pass created"
     
     msg_info "Setting up udev rules"
+    
+    # Remove any old/conflicting udev rules
+    rm -f /etc/udev/rules.d/99-usb-media-ingest.rules 2>/dev/null
+    rm -f /etc/udev/rules.d/99-ingest.rules 2>/dev/null
+    
+    # Create the correct udev rule
     cat > /etc/udev/rules.d/99-usb-ingest.rules << 'EOF'
 # USB Media Ingest - Trigger on USB storage device insertion
 ACTION=="add", KERNEL=="sd[a-z]", SUBSYSTEM=="block", RUN+="/usr/local/bin/usb-trigger.sh %k"
