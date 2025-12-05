@@ -79,6 +79,7 @@ CT_DISK=8
 CT_PASSWORD="mediaingest123"  # Change this if needed
 NAS_HOST_PATH="/mnt/pve/media-nas"
 CONTAINER_EXISTS=false
+TEMPLATE=""  # Will be auto-detected
 
 ################################################################################
 # Validation Functions
@@ -133,17 +134,35 @@ detect_storage() {
 ensure_template() {
     msg_info "Checking for Debian 12 template"
     
-    local TEMPLATE="debian-12-standard_12.2-1_amd64.tar.zst"
-    
-    if pveam list local | grep -q "$TEMPLATE"; then
-        msg_ok "Template found"
+    # Check if any Debian 12 template already exists
+    if pveam list local 2>/dev/null | grep -q "debian-12"; then
+        TEMPLATE=$(pveam list local | grep "debian-12" | head -1 | awk '{print $2}')
+        msg_ok "Template found: $TEMPLATE"
         return
     fi
     
     msg_info "Downloading Debian 12 template (this may take a few minutes)"
     msg_info "Updating template list..."
-    if ! pveam update 2>&1 | tee /tmp/pveam-update.log | grep -q "update successful\|download list successful"; then
+    
+    if ! pveam update 2>&1 | tee /tmp/pveam-update.log; then
         msg_warn "Template list update had issues, continuing..."
+    fi
+    
+    # Auto-detect the latest available Debian 12 template
+    msg_info "Detecting latest Debian 12 template..."
+    TEMPLATE=$(pveam available | grep "debian-12-standard" | grep "amd64" | tail -1 | awk '{print $2}')
+    
+    if [ -z "$TEMPLATE" ]; then
+        msg_error "No Debian 12 template found in repository"
+        echo -e "\n${YW}Available templates:${CL}"
+        pveam available | grep debian | head -10
+        echo ""
+        echo -e "${YW}Troubleshooting:${CL}"
+        echo "1. Check internet connectivity: ping -c 3 download.proxmox.com"
+        echo "2. Update template list manually: pveam update"
+        echo "3. List all available templates: pveam available"
+        echo ""
+        exit 1
     fi
     
     msg_info "Downloading template: $TEMPLATE"
@@ -160,11 +179,10 @@ ensure_template() {
         echo "Download log:"
         cat /tmp/pveam-download.log 2>/dev/null || echo "No log available"
         echo ""
-        echo -e "${YW}Troubleshooting:${CL}"
-        echo "1. Check internet connectivity: ping -c 3 download.proxmox.com"
-        echo "2. Verify storage 'local' exists: pvesm status"
-        echo "3. List available templates: pveam available | grep debian-12"
-        echo "4. Manual download: pveam download local $TEMPLATE"
+        echo -e "${YW}Try manually:${CL}"
+        echo "pveam update"
+        echo "pveam available | grep debian-12"
+        echo "pveam download local <template-name>"
         echo ""
         exit 1
     fi
@@ -272,9 +290,7 @@ create_container() {
     
     msg_info "Creating LXC container $CTID"
     
-    local TEMPLATE="debian-12-standard_12.2-1_amd64.tar.zst"
-    
-    # Create container with DHCP network
+    # Create container with DHCP network (using auto-detected template)
     pct create $CTID local:vztmpl/$TEMPLATE \
         --hostname $CT_NAME \
         --password "$CT_PASSWORD" \
