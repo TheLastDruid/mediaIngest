@@ -1,125 +1,172 @@
-# Media Ingest System
+# 📀 Universal USB Media Ingest System
 
-A modern, real-time monitoring dashboard for automated USB-to-NAS media transfers using Proxmox, LXC containers, and rsync.
+> **Developed by:** Spookyfunck  
+> **Repository:** https://github.com/TheLastDruid/mediaIngest  
+> **License:** MIT  
+> **Version:** 3.0
 
-![Dashboard Preview](https://img.shields.io/badge/Status-Production%20Ready-success)
-![Platform](https://img.shields.io/badge/Platform-Proxmox%20%2B%20LXC-blue)
-![License](https://img.shields.io/badge/License-MIT-green)
+A complete automated USB media ingest station for Proxmox VE. Automatically detects USB drives, scans for media folders, and syncs Movies/Series/Anime to your NAS with real-time web dashboard monitoring.
 
-## ✨ Features
+---
 
-- 🔄 **Automatic USB Detection** - Plug and play with udev rules
-- 📊 **Real-time Progress Monitoring** - Live transfer updates every 500ms
-- 📁 **Multi-folder Sync** - Movies, Series, Anime, and custom folders
-- 📈 **Transfer History** - Persistent tracking of all completed transfers
-- 💾 **Storage Health** - Monitor NAS and USB capacity
-- 🎮 **Control Actions** - Abort, Eject, and Scan controls
-- 📱 **Responsive Design** - Mobile-first, works on all devices
-- 🎨 **Dark Mode UI** - ProxMux-inspired Bento Grid layout
-- ⚡ **High Performance** - 50-70 MB/s transfer speeds
+## 🎯 Features
 
-## 🚀 Quick Install
+- **🔍 Intelligent NAS Detection**: Automatically scans `/mnt/pve/*` and `/mnt/*` for mounted storage
+- **📊 Interactive Storage Menu**: Shows available space, used space, and total capacity
+- **🚀 One-Click Installation**: Select destination once, then fully automated
+- **📁 Auto-Provisioning**: Creates `Media` folder with proper permissions if not exists
+- **🔄 Real-Time Monitoring**: Beautiful React dashboard with live sync progress
+- **🔌 Plug-and-Play**: Insert USB → Auto-detect → Auto-mount → Auto-sync
+- **🎨 Modern UI**: Framer Motion animations, Tailwind CSS styling
+- **📝 Comprehensive Logging**: Full audit trail of all ingest operations
 
-### Automated Installation (Recommended)
+---
 
-Run this single command on your **Proxmox host** to deploy everything automatically:
+## ⚡ Quick Start
 
-```bash
-bash -c "$(wget -qLO - http://192.168.1.14:3000/spooky/mediaingestDashboard/raw/branch/main/install.sh)"
-```
-
-Or download and inspect first:
+### One-Line Installation
 
 ```bash
-wget http://192.168.1.14:3000/spooky/mediaingestDashboard/raw/branch/main/install.sh
-bash install.sh
+bash -c "$(wget -qLO - https://raw.githubusercontent.com/TheLastDruid/mediaIngest/main/install.sh)"
 ```
 
-The installer will:
-- ✅ Configure Proxmox host for USB detection
-- ✅ Create and configure LXC container
-- ✅ Install all dependencies (Node.js, rsync, etc.)
-- ✅ Deploy dashboard application
-- ✅ Set up systemd services
-- ✅ Configure bind mounts for USB and NAS
+### Installation Steps
 
-**Interactive Prompts:**
-- Container ID (default: 105)
-- Container name (default: media-ingest)
-- Root password for container
-- NAS mount path on host
-- CPU/Memory/Disk allocation
-- Network configuration (DHCP or static IP)
+1. **Run the installer** as root on your Proxmox host
+2. **Select your NAS destination** from the interactive menu
+3. **Wait 5-10 minutes** for automated installation
+4. **Access dashboard** at `http://[container-ip]:3000`
+5. **Insert USB drive** with a `Media` folder to test
 
-### Manual Installation
-
-See [DEPLOYMENT_GUIDE.md](DEPLOYMENT_GUIDE.md) for step-by-step manual setup.
-
-## 📖 Documentation
-
-- [Quick Install Guide](INSTALL.md) - One-line installer
-- [Full Deployment Guide](DEPLOYMENT_GUIDE.md) - Step-by-step manual setup
-- [Scripts Documentation](scripts/README.md) - Script usage and customization
+---
 
 ## 🏗️ Architecture
 
 ```
-Proxmox Host → USB Detection (udev) → LXC Container → Rsync → NAS
-                     ↓
-            Real-time Dashboard (React + Node.js)
+┌─────────────────┐
+│   USB Drive     │
+│   /Media        │
+│   ├─ Movies     │
+│   ├─ Series     │
+│   └─ Anime      │
+└────────┬────────┘
+         │
+    ┌────▼────────────────────┐
+    │   Proxmox Host          │
+    │   • udev rules          │
+    │   • ntfs3/ntfs-3g mount │
+    │   • usb-trigger.sh      │
+    └────┬────────────────────┘
+         │
+    ┌────▼─────────────────────┐
+    │   LXC Container          │
+    │   • Privileged           │
+    │   • Bind mounts          │
+    │   • ingest-media.sh      │
+    │   • React Dashboard      │
+    └────┬─────────────────────┘
+         │
+    ┌────▼────────────────┐
+    │   NAS/Storage       │
+    │   /Media            │
+    │   ├─ Movies         │
+    │   ├─ Series         │
+    │   └─ Anime          │
+    └─────────────────────┘
 ```
-
-## 🔧 Tech Stack
-
-**Frontend:**
-- React 18.2 + Vite 4.5
-- Tailwind CSS 3.3
-- Framer Motion 10.16
-- Lucide React Icons
-
-**Backend:**
-- Node.js + Express 4.18
-- Real-time log parsing
-- RESTful API
-
-**Infrastructure:**
-- Proxmox VE
-- LXC Containers
-- rsync with progress tracking
-- systemd services
-- udev automation
-
-## 📊 API Endpoints
-
-- `GET /api/status` - Current transfer status
-- `GET /api/history` - Transfer history (last 10)
-- `GET /api/stats` - System statistics
-- `GET /api/storage` - Storage health (NAS, USB)
-- `POST /api/abort` - Abort current transfer
-- `POST /api/eject` - Eject USB drive
-- `POST /api/scan` - Trigger media library scan
-
-## 🛠️ Development
-
-### Backend (Node.js + Express)
-```bash
-cd /home/spooky/Desktop/copyMontior
-npm install
-npm start  # Runs on port 3000
-```
-
-### Frontend (React + Vite)
-```bash
-cd /home/spooky/Desktop/copyMontior/client
-npm install
-npm run dev  # Development mode with HMR
-npm run build  # Production build
-```
-
-## 📝 License
-
-MIT License - see [LICENSE](LICENSE) file for details
 
 ---
 
-**Made with ❤️ for Home Lab enthusiasts**
+## 📋 What Gets Installed
+
+### Container Configuration
+
+- **Container ID**: Auto-detected (next available)
+- **Hostname**: `media-ingest`
+- **Type**: Privileged (required for bind mounts)
+- **Resources**: 2 CPU cores, 2GB RAM, 8GB disk
+- **Network**: DHCP (auto-assigned IP)
+- **Password**: `mediaingest123`
+
+---
+
+## 🎮 Usage
+
+### Basic Workflow
+
+1. **Prepare USB Drive**
+   ```
+   USB Drive
+   └── Media
+       ├── Movies
+       ├── Series
+       └── Anime
+   ```
+
+2. **Insert USB** into Proxmox host
+3. **Watch Dashboard** for real-time progress
+4. **Remove USB** when sync completes
+
+---
+
+## 🛠️ Troubleshooting
+
+### View Logs
+
+```bash
+# Inside container
+pct enter [CT_ID]
+tail -f /var/log/media-ingest.log
+```
+
+### Test USB Trigger
+
+```bash
+/usr/local/bin/usb-trigger.sh /dev/sdX
+```
+
+---
+
+## 🤝 Contributing
+
+Developed by **Spookyfunck** as part of a home lab media management solution.
+
+### How to Contribute
+
+```bash
+git clone https://github.com/TheLastDruid/mediaIngest.git
+cd mediaIngest
+# Make your changes
+git add .
+git commit -m "Your changes"
+git push origin main
+```
+
+---
+
+## 📝 License
+
+MIT License - Copyright (c) 2025 Spookyfunck
+
+---
+
+## 🎨 Vibe Code Philosophy
+
+This project embraces the **Vibe Code** philosophy:
+
+- **It Just Works™**: Install once, forget about it
+- **Beautiful UX**: Modern, animated, responsive interface
+- **Developer Friendly**: Clean code, comprehensive docs
+- **Production Ready**: Battle-tested in real home lab environments
+
+Built with care for the home lab community.
+
+---
+
+**Made with ❤️ by Spookyfunck**
+
+**Repository**: https://github.com/TheLastDruid/mediaIngest
+
+---
+
+*Last Updated: December 5, 2025*
