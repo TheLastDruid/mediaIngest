@@ -487,10 +487,23 @@ fi
 
 echo "Target Found: $FOUND_SRC" >> "$LOG"
 
+# Check if destination NAS already has a Media folder (case-insensitive)
+DEST_MEDIA=$(find "$DEST_ROOT" -maxdepth 1 -type d -iname "Media" 2>/dev/null | head -n 1)
+
+if [ -n "$DEST_MEDIA" ]; then
+    echo "Using existing Media folder on NAS: $DEST_MEDIA" >> "$LOG"
+    DEST_BASE="$DEST_MEDIA"
+else
+    echo "Creating new Media folder on NAS: $DEST_ROOT/Media" >> "$LOG"
+    mkdir -p "$DEST_ROOT/Media"
+    chmod 777 "$DEST_ROOT/Media"
+    DEST_BASE="$DEST_ROOT/Media"
+fi
+
 sync_folder() {
     FOLDER_NAME=$1
     SRC_SUB=$(find "$FOUND_SRC" -maxdepth 1 -type d -iname "$FOLDER_NAME" 2>/dev/null | head -n 1)
-    DST_PATH="$DEST_ROOT/$FOLDER_NAME"
+    DST_PATH="$DEST_BASE/$FOLDER_NAME"
 
     if [ -n "$SRC_SUB" ]; then
         # Check if folder has any content
