@@ -338,18 +338,35 @@ EOFSCRIPT
     mkdir -p /mnt/usb-pass
     msg_ok "Mount point /mnt/usb-pass created"
     
+    msg_info "Setting up systemd service for USB trigger"
+    
+    # Create systemd service for USB handling with proper privileges
+    cat > /etc/systemd/system/usb-ingest@.service << 'EOF'
+[Unit]
+Description=USB Media Ingest for %I
+After=local-fs.target
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/bin/usb-trigger.sh %I
+RemainAfterExit=no
+EOF
+
+    systemctl daemon-reload
+    msg_ok "Systemd service created"
+    
     msg_info "Setting up udev rules"
     
     # Remove any old/conflicting udev rules
     rm -f /etc/udev/rules.d/99-usb-media-ingest.rules 2>/dev/null
     rm -f /etc/udev/rules.d/99-ingest.rules 2>/dev/null
     
-    # Create the correct udev rule
+    # Create the correct udev rule that triggers systemd service
     cat > /etc/udev/rules.d/99-usb-ingest.rules << 'EOF'
-# USB Media Ingest - Trigger on USB storage device insertion
+# USB Media Ingest - Trigger on USB storage device insertion via systemd
 # Triggers on both disk devices (sdb) and partitions (sdb1)
-ACTION=="add", KERNEL=="sd[a-z]", SUBSYSTEM=="block", ENV{DEVTYPE}=="disk", RUN+="/usr/local/bin/usb-trigger.sh %k"
-ACTION=="add", KERNEL=="sd[a-z][0-9]", SUBSYSTEM=="block", ENV{DEVTYPE}=="partition", ENV{ID_FS_USAGE}=="filesystem", RUN+="/usr/local/bin/usb-trigger.sh %k"
+ACTION=="add", KERNEL=="sd[a-z]", SUBSYSTEM=="block", ENV{DEVTYPE}=="disk", TAG+="systemd", ENV{SYSTEMD_WANTS}+="usb-ingest@%k.service"
+ACTION=="add", KERNEL=="sd[a-z][0-9]", SUBSYSTEM=="block", ENV{DEVTYPE}=="partition", ENV{ID_FS_USAGE}=="filesystem", TAG+="systemd", ENV{SYSTEMD_WANTS}+="usb-ingest@%k.service"
 EOF
     
     # Reload and verify udev rules
