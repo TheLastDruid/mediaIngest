@@ -1,16 +1,20 @@
 #!/bin/bash
 
 ################################################################################
-# Media Ingest System - Automated Installer
-# Style inspired by Proxmox VE Helper Scripts (tteck)
+# Media Ingest System - Zero-Touch Installer
 # 
-# This script automates the complete deployment:
-# - Proxmox Host USB detection setup
-# - LXC Container creation and configuration
-# - Dashboard application deployment
+# Completely automated deployment with NO user prompts
+# Just run and walk away!
+#
+# Features:
+# - Auto-detects next available container ID
+# - Auto-selects storage pool
+# - Auto-downloads templates if needed
+# - Configures everything silently
 ################################################################################
 
 set -e
+set -o pipefail
 
 ################################################################################
 # Color Definitions
@@ -65,6 +69,18 @@ EOF
 }
 
 ################################################################################
+# Configuration Variables (Hardcoded - No User Input)
+################################################################################
+CT_NAME="media-ingest"
+CT_CORES=2
+CT_MEMORY=2048
+CT_SWAP=512
+CT_DISK=8
+CT_PASSWORD="mediaingest123"  # Change this if needed
+NAS_HOST_PATH="/mnt/pve/media-nas"
+CONTAINER_EXISTS=false
+
+################################################################################
 # Validation Functions
 ################################################################################
 check_root() {
@@ -82,6 +98,64 @@ check_proxmox() {
         exit 1
     fi
     msg_ok "Proxmox VE detected"
+}
+
+################################################################################
+# Auto-Detection Functions
+################################################################################
+get_next_ctid() {
+    msg_info "Auto-detecting next container ID"
+    CTID=$(pvesh get /cluster/nextid)
+    msg_ok "Container ID: $CTID"
+}
+
+detect_storage() {
+    msg_info "Detecting available storage"
+    
+    # Prefer local-lvm, fallback to local
+    if pvesm status | grep -q "local-lvm"; then
+        STORAGE="local-lvm"
+    elif pvesm status | grep -q "^local"; then
+        STORAGE="local"
+    else
+        # Use first available storage
+        STORAGE=$(pvesm status | awk 'NR==2 {print $1}')
+    fi
+    
+    if [ -z "$STORAGE" ]; then
+        msg_error "No storage found"
+        exit 1
+    fi
+    
+    msg_ok "Using storage: $STORAGE"
+}
+
+ensure_template() {
+    msg_info "Checking for Debian 12 template"
+    
+    local TEMPLATE="debian-12-standard_12.2-1_amd64.tar.zst"
+    
+    if pveam list local | grep -q "$TEMPLATE"; then
+        msg_ok "Template found"
+        return
+    fi
+    
+    msg_info "Downloading Debian 12 template (this may take a few minutes)"
+    pveam update >/dev/null 2>&1
+    pveam download local $TEMPLATE >/dev/null 2>&1
+    msg_ok "Template downloaded"
+}
+
+prepare_nas_path() {
+    msg_info "Checking NAS mount path"
+    
+    if [ -d "$NAS_HOST_PATH" ]; then
+        msg_ok "NAS path exists: $NAS_HOST_PATH"
+    else
+        msg_warn "NAS path not found, creating placeholder"
+        mkdir -p "$NAS_HOST_PATH"
+        msg_ok "Created: $NAS_HOST_PATH"
+    fi
 }
 
 ################################################################################
@@ -157,108 +231,34 @@ EOF
 }
 
 ################################################################################
-# Phase 2: LXC Container Creation
+# Phase 2: LXC Container Creation (Zero-Touch)
 ################################################################################
-get_container_config() {
-    echo -e "\n${BL}[Phase 2]${CL} LXC Container Configuration\n"
-    
-    # Container ID
-    read -p "Enter Container ID [105]: " CTID
-    CTID=${CTID:-105}
+create_container() {
+    echo -e "\n${BL}[Phase 2]${CL} LXC Container Creation\n"
     
     # Check if container already exists
     if pct status $CTID &>/dev/null; then
-        msg_warn "Container $CTID already exists"
-        read -p "Use existing container? (y/N): " USE_EXISTING
-        if [[ ! "$USE_EXISTING" =~ ^[Yy]$ ]]; then
-            msg_error "Please choose a different container ID"
-            exit 1
-        fi
+        msg_warn "Container $CTID already exists, skipping creation"
         CONTAINER_EXISTS=true
-        return
-    fi
-    
-    # Container Name
-    read -p "Enter Container Name [media-ingest]: " CT_NAME
-    CT_NAME=${CT_NAME:-media-ingest}
-    
-    # Container Password
-    read -sp "Enter root password for container: " CT_PASSWORD
-    echo
-    if [ -z "$CT_PASSWORD" ]; then
-        msg_error "Password cannot be empty"
-        exit 1
-    fi
-    
-    # NAS Mount Path
-    echo -e "\n${YW}NAS Configuration:${CL}"
-    read -p "Enter NAS mount path on Proxmox host [/mnt/pve/media-nas]: " NAS_HOST_PATH
-    NAS_HOST_PATH=${NAS_HOST_PATH:-/mnt/pve/media-nas}
-    
-    if [ ! -d "$NAS_HOST_PATH" ]; then
-        msg_warn "NAS path $NAS_HOST_PATH does not exist"
-        read -p "Continue anyway? (y/N): " CONTINUE
-        if [[ ! "$CONTINUE" =~ ^[Yy]$ ]]; then
-            exit 1
-        fi
-    fi
-    
-    # Container Resources
-    read -p "CPU cores [2]: " CT_CORES
-    CT_CORES=${CT_CORES:-2}
-    
-    read -p "Memory (MB) [2048]: " CT_MEMORY
-    CT_MEMORY=${CT_MEMORY:-2048}
-    
-    read -p "Disk size (GB) [8]: " CT_DISK
-    CT_DISK=${CT_DISK:-8}
-    
-    # Network Configuration
-    echo -e "\n${YW}Network Configuration:${CL}"
-    read -p "IP address (CIDR) [DHCP]: " CT_IP
-    CT_IP=${CT_IP:-dhcp}
-    
-    if [ "$CT_IP" != "dhcp" ]; then
-        read -p "Gateway: " CT_GW
-        read -p "DNS server [8.8.8.8]: " CT_DNS
-        CT_DNS=${CT_DNS:-8.8.8.8}
-    fi
-}
-
-create_container() {
-    if [ "$CONTAINER_EXISTS" = true ]; then
-        msg_ok "Using existing container $CTID"
+        
+        # Still update the trigger script
+        sed -i "s/__LXC_ID__/$CTID/g" /usr/local/bin/usb-trigger.sh 2>/dev/null || true
         return
     fi
     
     msg_info "Creating LXC container $CTID"
     
-    # Get latest Debian template
-    local TEMPLATE=$(pveam available | grep debian-12 | tail -n 1 | awk '{print $2}')
-    if [ -z "$TEMPLATE" ]; then
-        msg_error "No Debian 12 template found"
-        echo "Please download a template first:"
-        echo "  pveam update"
-        echo "  pveam download local debian-12-standard_12.2-1_amd64.tar.zst"
-        exit 1
-    fi
+    local TEMPLATE="debian-12-standard_12.2-1_amd64.tar.zst"
     
-    # Build network config
-    local NET_CONFIG="name=eth0,bridge=vmbr0,firewall=1"
-    if [ "$CT_IP" = "dhcp" ]; then
-        NET_CONFIG="$NET_CONFIG,ip=dhcp"
-    else
-        NET_CONFIG="$NET_CONFIG,ip=$CT_IP,gw=$CT_GW"
-    fi
-    
-    # Create container
+    # Create container with DHCP network
     pct create $CTID local:vztmpl/$TEMPLATE \
         --hostname $CT_NAME \
         --password "$CT_PASSWORD" \
         --cores $CT_CORES \
         --memory $CT_MEMORY \
-        --rootfs local-lvm:$CT_DISK \
-        --net0 $NET_CONFIG \
+        --swap $CT_SWAP \
+        --rootfs $STORAGE:$CT_DISK \
+        --net0 name=eth0,bridge=vmbr0,firewall=1,ip=dhcp \
         --features nesting=1,fuse=1 \
         --unprivileged 0 \
         --onboot 1 \
@@ -278,7 +278,7 @@ create_container() {
     
     msg_info "Starting container"
     pct start $CTID
-    sleep 5
+    sleep 8
     msg_ok "Container started"
 }
 
@@ -476,22 +476,29 @@ show_summary() {
 }
 
 ################################################################################
-# Main Execution
+# Main Execution (Zero-Touch)
 ################################################################################
 main() {
     header_info
-    echo -e "\n${YW}Starting automated installation...${CL}\n"
+    echo -e "\n${GN}═══════════════════════════════════════════════════════════════${CL}"
+    echo -e "${GN}        Zero-Touch Installation - No User Input Required        ${CL}"
+    echo -e "${GN}═══════════════════════════════════════════════════════════════${CL}\n"
     sleep 2
     
     # Validation
     check_root
     check_proxmox
     
+    # Auto-Detection
+    get_next_ctid
+    detect_storage
+    ensure_template
+    prepare_nas_path
+    
     # Phase 1: Host Setup
     setup_host_scripts
     
     # Phase 2: Container Creation
-    get_container_config
     create_container
     
     # Phase 3: Container Bootstrap
