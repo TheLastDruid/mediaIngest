@@ -360,6 +360,7 @@ in the Software without restriction...
 - **React & Vite** - For the modern frontend tooling
 - **Framer Motion** - For beautiful animations
 - **Tailwind CSS** - For rapid UI development
+- **AI Assistance** - Frontend UI was vibe-coded with AI pair programming
 - **Home Lab Community** - For testing and feedback
 
 ---
