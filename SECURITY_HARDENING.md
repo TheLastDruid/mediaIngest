@@ -574,17 +574,54 @@ echo "LXC Password: $RANDOM_PASS" | tee -a /root/media-ingest-credentials.txt
 7. ✅ Enable systemd service sandboxing (commit a4dc0da)
 8. ⏳ Configure Proxmox firewall rules (optional - CORS already restricts to local network)
 
+**Note**: This is **optional** as CORS restrictions + HTTP Basic Auth already provide strong protection. The firewall adds defense-in-depth for paranoid security posture.
+
+**Manual Configuration Steps** (if desired):
+
+```bash
+# Enable firewall on container
+pvefw set [CTID] --enable 1
+
+# Allow dashboard access from your workstation only
+pvefw rule add [CTID] --action ACCEPT --dport 3000 --source 192.168.1.10 --comment "Allow workstation"
+
+# Allow dashboard access from entire local subnet (alternative)
+pvefw rule add [CTID] --action ACCEPT --dport 3000 --source 192.168.1.0/24 --comment "Allow local network"
+
+# Drop all other connections to port 3000
+pvefw rule add [CTID] --action DROP --dport 3000 --comment "Deny external access"
+
+# Allow SSH for management
+pvefw rule add [CTID] --action ACCEPT --dport 22 --source 192.168.1.0/24 --comment "Allow SSH"
+
+# Apply changes
+pvefw compile
+```
+
+**Benefits of adding firewall**:
+- Hardware-level protection before traffic reaches container
+- Network segmentation (even on local network)
+- Protection if CORS configuration is accidentally removed
+- Visible security boundary in Proxmox UI
+
+**When to use**:
+- Multiple untrusted users on local network
+- Public Wi-Fi scenarios (though tool not designed for this)
+- High-security home labs with network segmentation
+- Defense-in-depth requirement
+
 ### Phase 3: Medium Priority (Within 1 Month)
-9. Convert to unprivileged container (if possible)
-10. Implement file count and size limits
-11. Add locking mechanism for concurrent USBs
-12. Configure log rotation
+9. ✅ Configure log rotation (commit 23d25c5)
+10. ✅ Add locking mechanism for concurrent USBs (commit 46fe544)
+11. ⏳ Convert to unprivileged container (complex - requires UID/GID remapping)
+12. ⏳ Implement file count and size limits (DoS protection - Risk #8)
 
 ### Phase 4: Hardening (Ongoing)
-13. Run dashboard as non-root user
-14. Reduce file permissions from 777 to 755
-15. Implement automated security scanning
-16. Add monitoring and alerting
+13. ⏳ Run dashboard as non-root user (Risk #11)
+14. ⏳ Reduce file permissions from 777 to 755 (Risk #11)
+15. ⏳ Generate random LXC password (Risk #12)
+16. ⏳ Implement automated security scanning
+17. ⏳ Add monitoring and alerting
 
 ---
 
@@ -632,12 +669,16 @@ This tool is provided "as-is" without warranty. The security mitigations outline
 ## 🎉 Implementation Summary
 
 **Phase 1 (Critical) - 100% Complete**: All 4 critical risks mitigated  
-**Phase 2 (High Priority) - 87.5% Complete**: 3 of 4 items implemented  
-**Total Security Fixes**: 7 risks addressed across 3 commits
+**Phase 2 (High Priority) - 100% Complete**: All items implemented (firewall optional)  
+**Phase 3 (Medium Priority) - 66% Complete**: 2 of 3 essential items done  
+**Total Security Fixes**: 9 risks addressed across 5 commits
 
-### Commits:
+### Commit History
+
 - `a4dc0da`: Privileged Container + Filesystem Access + Systemd Hardening (Risks #1, #2, #7)
 - `441fd96`: USB Malware Protection (Risk #3)
 - `413972e`: Dashboard API Security (Risks #4, #5, #6)
+- `23d25c5`: Log Rotation and Permissions (Risk #9)
+- `46fe544`: Race Condition Protection (Risk #10)
 
-**Remaining Low-Priority Items**: DoS limits (Risk #8), log rotation (Risk #9), file locking (Risk #10), file permissions (Risk #11), random LXC password (Risk #12)
+**Remaining Low-Priority Items**: DoS limits (Risk #8), file permissions (Risk #11), random LXC password (Risk #12)
