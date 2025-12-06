@@ -719,9 +719,26 @@ done
 create_status "processing" "Starting media ingest" 0 "$DEVICE_NAME"
 log "Starting ingest from $USB_PATH"
 
+# Look for Media folder first (common structure: USB/Media/Movies, etc.)
+MEDIA_ROOT="$USB_PATH"
+if [ -d "$USB_PATH/Media" ]; then
+    MEDIA_ROOT="$USB_PATH/Media"
+    log "Found Media folder at $MEDIA_ROOT"
+elif [ -d "$USB_PATH/media" ]; then
+    MEDIA_ROOT="$USB_PATH/media"
+    log "Found media folder at $MEDIA_ROOT"
+fi
+
+# Temporarily override USB_PATH for sync operations
+ORIGINAL_USB_PATH="$USB_PATH"
+USB_PATH="$MEDIA_ROOT"
+
 sync_folder "Movies"
 sync_folder "Series"
 sync_folder "Anime"
+
+# Restore original USB_PATH
+USB_PATH="$ORIGINAL_USB_PATH"
 
 log "Ingest complete"
 create_status "complete" "Ingest successful" 100 "$DEVICE_NAME"
