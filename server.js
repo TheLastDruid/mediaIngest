@@ -6,8 +6,8 @@ const { exec } = require('child_process');
 const basicAuth = require('express-basic-auth');
 const rateLimit = require('express-rate-limit');
 
-const LOG_PATH = '/var/log/media-ingest.log';
-const PROGRESS_LOG_PATH = '/var/log/media-ingest.log'; // Use main log since progress log isn't being populated
+const LOG_PATH = '/var/log/ingest-media.log'; // Match actual log file from ingest-media.sh
+const PROGRESS_LOG_PATH = '/var/log/ingest-media.log'; // Match actual log file from ingest-media.sh
 const HISTORY_PATH = path.join(__dirname, 'history.json');
 const TMDB_CONFIG_PATH = path.join(__dirname, 'tmdb-config.json');
 const ANILIST_CONFIG_PATH = path.join(__dirname, 'anilist-config.json');
