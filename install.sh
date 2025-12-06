@@ -463,6 +463,7 @@ create_container() {
     echo -e "${BL}[INFO]${CL} This may take 30-60 seconds..."
     
     # Create container with DHCP network (using auto-detected template)
+    # Redirect verbose output to log file, only show errors
     if pct create $CTID local:vztmpl/$TEMPLATE \
         --hostname $CT_NAME \
         --password "$CT_PASSWORD" \
@@ -473,7 +474,7 @@ create_container() {
         --net0 name=eth0,bridge=vmbr0,firewall=1,ip=dhcp \
         --unprivileged 0 \
         --onboot 1 \
-        --start 0 2>&1 | tee /tmp/pct-create.log; then
+        --start 0 > /tmp/pct-create.log 2>&1; then
         msg_ok "Container $CTID created"
     else
         msg_error "Container creation failed"
