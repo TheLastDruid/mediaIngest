@@ -4,6 +4,16 @@ import { HardDrive, Activity, CheckCircle, Film, Tv, Database, Zap, XCircle, Ser
 
 // Update Notification Banner
 function UpdateBanner({ version, onDismiss }) {
+  const [copied, setCopied] = useState(false)
+  
+  const updateCommand = 'bash <(wget -qO- https://raw.githubusercontent.com/TheLastDruid/mediaIngest/main/update.sh)'
+  
+  const copyCommand = () => {
+    navigator.clipboard.writeText(updateCommand)
+    setCopied(true)
+    setTimeout(() => setCopied(false), 2000)
+  }
+  
   return (
     <motion.div
       initial={{ opacity: 0, y: -20 }}
@@ -13,16 +23,25 @@ function UpdateBanner({ version, onDismiss }) {
     >
       <div className="flex items-start gap-3 flex-1">
         <Download className="w-5 h-5 text-blue-400 mt-0.5 flex-shrink-0" />
-        <div>
+        <div className="flex-1">
           <div className="font-semibold text-white mb-1">Update Available</div>
-          <div className="text-sm text-slate-300">
+          <div className="text-sm text-slate-300 mb-2">
             Version {version.latest.version} is now available. You're currently running {version.current.version}.
+          </div>
+          <div className="bg-slate-900/50 rounded-lg p-3 font-mono text-xs text-slate-300 flex items-center justify-between gap-2 mb-2">
+            <code className="flex-1 overflow-x-auto">{updateCommand}</code>
+            <button
+              onClick={copyCommand}
+              className="px-2 py-1 bg-blue-600/30 hover:bg-blue-600/50 rounded text-blue-400 transition-colors flex-shrink-0"
+            >
+              {copied ? '✓ Copied' : 'Copy'}
+            </button>
           </div>
           <a 
             href={version.latest.downloadUrl} 
             target="_blank" 
             rel="noopener noreferrer"
-            className="inline-block mt-2 text-blue-400 hover:text-blue-300 text-sm font-medium underline"
+            className="inline-block text-blue-400 hover:text-blue-300 text-sm font-medium underline"
           >
             View Release Notes →
           </a>
@@ -30,7 +49,7 @@ function UpdateBanner({ version, onDismiss }) {
       </div>
       <button
         onClick={onDismiss}
-        className="text-slate-400 hover:text-white transition-colors p-1"
+        className="text-slate-400 hover:text-white transition-colors p-1 ml-2"
         title="Dismiss"
       >
         <X className="w-4 h-4" />
