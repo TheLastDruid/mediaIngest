@@ -601,12 +601,14 @@ log() {
 
 create_status() {
     mkdir -p "$(dirname "$INGEST_STATUS")"
+    local device_name="${4:-Unknown Device}"
     cat > "$INGEST_STATUS" << EOF
 {
   "status": "$1",
   "message": "$2",
   "timestamp": "$(date -Iseconds)",
-  "progress": ${3:-0}
+  "progress": ${3:-0},
+  "deviceName": "$device_name"
 }
 EOF
 }
@@ -666,7 +668,7 @@ sync_folder() {
         tail -1 | \
         while read -r percent; do
             progress=${percent%\%}
-            create_status "syncing" "Syncing $FOLDER" "$progress"
+            create_status "syncing" "Syncing $FOLDER" "$progress" "$DEVICE_NAME"
         done
     
     log "$FOLDER sync complete"
@@ -679,18 +681,18 @@ sync_folder() {
 # Check if running as root
 if [ "$EUID" -ne 0 ]; then
     log "ERROR: Must run as root"
-    create_status "error" "Must run as root" 0
+    create_status "error" "Must run as root" 0 ""
     exit 1
 fi
 
 # Verify network storage is mounted
 if [ ! -d "$NETWORK_DIR" ]; then
     log "ERROR: Network storage not mounted"
-    create_status "error" "Network storage not available" 0
+    create_status "error" "Network storage not available" 0 ""
     exit 1
 fi
 
-create_status "idle" "Waiting for USB device" 0
+create_status "idle" "Waiting for USB device" 0 ""
 
 # Wait for USB device
 while true; do
@@ -698,8 +700,14 @@ while true; do
     
     if [ -n "$USB_DEVICE" ]; then
         USB_PATH="$USB_DEVICE"
-        log "USB device detected: $USB_PATH"
-        create_status "detected" "USB device detected" 0
+        
+        # Try to get device label/name
+        DEVICE_NAME=$(lsblk -nlo NAME,TYPE,MOUNTPOINT,LABEL | awk -v mp="$USB_DEVICE" '$3 == mp {print $4; exit}')
+        [ -z "$DEVICE_NAME" ] && DEVICE_NAME=$(lsblk -nlo NAME,TYPE,MOUNTPOINT,MODEL | awk -v mp="$USB_DEVICE" '$3 == mp {print $4" "$5" "$6; exit}' | xargs)
+        [ -z "$DEVICE_NAME" ] && DEVICE_NAME="USB Drive"
+        
+        log "USB device detected: $USB_PATH ($DEVICE_NAME)"
+        create_status "detected" "USB device detected" 0 "$DEVICE_NAME"
         sleep 2
         break
     fi
@@ -708,7 +716,7 @@ while true; do
 done
 
 # Perform ingest
-create_status "processing" "Starting media ingest" 0
+create_status "processing" "Starting media ingest" 0 "$DEVICE_NAME"
 log "Starting ingest from $USB_PATH"
 
 sync_folder "Movies"
@@ -716,7 +724,7 @@ sync_folder "Series"
 sync_folder "Anime"
 
 log "Ingest complete"
-create_status "complete" "Ingest successful" 100
+create_status "complete" "Ingest successful" 100 "$DEVICE_NAME"
 
 # Wait before unmounting
 sleep 3
@@ -727,7 +735,7 @@ if mountpoint -q "$USB_PATH"; then
     log "USB device unmounted"
 fi
 
-create_status "idle" "Ready for next device" 0
+create_status "idle" "Ready for next device" 0 ""
 EOFSCRIPT
     fi
     

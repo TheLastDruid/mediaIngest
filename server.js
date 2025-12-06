@@ -497,12 +497,24 @@ app.get('/api/status', (req, res) => {
   const current = parseCurrentTransfer();
   const active = current.filename !== null || current.progress > 0;
   
+  // Read device name from ingest status file
+  let deviceName = null;
+  const ingestStatusPath = '/run/ingest/status.json';
+  try {
+    if (fs.existsSync(ingestStatusPath)) {
+      const statusData = JSON.parse(fs.readFileSync(ingestStatusPath, 'utf8'));
+      deviceName = statusData.deviceName || null;
+    }
+  } catch (e) {
+    // Ignore errors reading status file
+  }
+  
   // Debug logging when active
   if (active && process.env.DEBUG) {
     console.log(`[DEBUG] Active transfer: ${current.filename} - ${current.progress}% - ${current.speed}`);
   }
   
-  res.json({ ok: true, active, current });
+  res.json({ ok: true, active, current, deviceName });
 });
 
 // API: Version check endpoint

@@ -206,7 +206,7 @@ function ActiveTransferCard({ current, onAbort }) {
   )
 }
 
-function DeviceCard({ onAction }) {
+function DeviceCard({ onAction, deviceName }) {
   const [loading, setLoading] = useState(null)
 
   const handleAction = async (action, endpoint) => {
@@ -239,7 +239,7 @@ function DeviceCard({ onAction }) {
       <div className="space-y-4">
         <div>
           <div className="text-xs uppercase tracking-wide text-slate-600 mb-1">Device</div>
-          <div className="text-sm font-medium text-white">Samsung T7 Shield</div>
+          <div className="text-sm font-medium text-white">{deviceName || 'No device connected'}</div>
         </div>
         
         {/* Hide on mobile to save space */}
@@ -513,6 +513,7 @@ function HistoryCard({ history, isExpanded }) {
 export default function App() {
   const [active, setActive] = useState(false)
   const [current, setCurrent] = useState({ filename: null, progress: 0, speed: null, timeRemaining: null, size: null })
+  const [deviceName, setDeviceName] = useState(null)
   const [history, setHistory] = useState([])
   const [stats, setStats] = useState({ totalFiles: 0, totalGB: '0.00', lastActive: null })
   const [storage, setStorage] = useState({ nas: null, usb: null })
@@ -532,17 +533,19 @@ export default function App() {
     // Initial data fetch
     async function fetchInitialData() {
       try {
-        const [historyRes, statsRes, storageRes, versionRes] = await Promise.all([
+        const [historyRes, statsRes, storageRes, versionRes, statusRes] = await Promise.all([
           fetch('/api/history'),
           fetch('/api/stats'),
           fetch('/api/storage'),
-          fetch('/api/version')
+          fetch('/api/version'),
+          fetch('/api/status')
         ])
         
         const historyData = await historyRes.json()
         const statsData = await statsRes.json()
         const storageData = await storageRes.json()
         const versionData = await versionRes.json()
+        const statusData = await statusRes.json()
         
         if (!mounted) return
         
@@ -556,6 +559,10 @@ export default function App() {
         
         if (storageData.ok) {
           setStorage(storageData.storage)
+        }
+        
+        if (statusData.ok && statusData.deviceName) {
+          setDeviceName(statusData.deviceName)
         }
         
         if (versionData.ok && versionData.updateAvailable) {
@@ -581,6 +588,12 @@ export default function App() {
             const current = message.data || { filename: null, progress: 0, speed: null, timeRemaining: null, size: null }
             setActive(current.filename !== null || current.progress > 0)
             setCurrent(current)
+            // Device name comes from separate API call
+            fetch('/api/status').then(r => r.json()).then(data => {
+              if (data.ok && data.deviceName && mounted) {
+                setDeviceName(data.deviceName)
+              }
+            }).catch(() => {})
           } else if (message.type === 'update') {
             // Refresh history and stats when new transfers complete
             fetch('/api/history').then(r => r.json()).then(data => {
@@ -702,7 +715,7 @@ export default function App() {
           <div className={`grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3 sm:gap-4 transition-all duration-500`}>
             <StatsCard stats={stats} />
             <StorageCard storage={storage} />
-            <DeviceCard onAction={showToast} />
+            <DeviceCard onAction={showToast} deviceName={deviceName} />
           </div>
 
           {/* History - Expands to fill space when idle */}
