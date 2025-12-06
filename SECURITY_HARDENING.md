@@ -452,17 +452,18 @@ EOF
 
 ### 9. Information Disclosure via Logs
 
-**Risk Level**: Low (CVSS 3.1)
+**Risk Level**: Low (CVSS 3.1)  
+**Status**: ✅ **IMPLEMENTED** (Log permissions 640, rotation at 100MB with 5 archives)
 
 **Description**: Log files contain sensitive information about NAS structure, transfer patterns, and file names that could aid an attacker.
 
 **Mitigation**:
-- Implement log rotation (shown in Risk #8)
-- Restrict log file permissions: `chmod 640 /var/log/media-ingest.log`
-- Avoid logging full file paths (log relative paths only)
-- Redact sensitive information in dashboard error messages
+- ✅ Implement log rotation (configured in install.sh)
+- ✅ Restrict log file permissions: `chmod 640 /var/log/media-ingest.log`
+- ⚠️ Full file paths still logged (acceptable for home lab use)
+- ⚠️ Dashboard error messages not redacted (low risk with authentication)
 
-**Status**: ⏳ Pending Implementation
+**Status**: ✅ **IMPLEMENTED** (Log permissions 640, rotation at 100MB with 5 archives)
 
 ---
 

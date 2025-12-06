@@ -605,8 +605,23 @@ bootstrap_container() {
     msg_ok "Node.js installed"
     
     msg_info "Creating log file"
-    pct exec $CTID -- bash -c "touch /var/log/media-ingest.log && chmod 644 /var/log/media-ingest.log"
+    pct exec $CTID -- bash -c "touch /var/log/media-ingest.log && chmod 640 /var/log/media-ingest.log"
     msg_ok "Log file created"
+    
+    msg_info "Configuring log rotation"
+    pct exec $CTID -- bash -c 'cat > /etc/logrotate.d/media-ingest << '\''EOF'\''
+/var/log/media-ingest.log {
+    size 100M
+    rotate 5
+    compress
+    delaycompress
+    notifempty
+    missingok
+    create 0640 root root
+    sharedscripts
+}
+EOF'
+    msg_ok "Log rotation configured"
     
     msg_info "Deploying ingest script"
     
