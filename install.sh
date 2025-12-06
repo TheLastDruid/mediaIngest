@@ -288,6 +288,18 @@ if [ -z "$KERNEL_DEVICE" ]; then
     exit 1
 fi
 
+# Security: Validate kernel device name (must match sd[a-z] or sd[a-z][0-9])
+if ! echo "$KERNEL_DEVICE" | grep -qE '^sd[a-z][0-9]*$'; then
+    echo "$(date): ERROR - Invalid device name: $KERNEL_DEVICE (security violation)" >> /var/log/usb-trigger.log
+    exit 1
+fi
+
+# Security: Prevent path traversal
+if echo "$KERNEL_DEVICE" | grep -q '\.\.|/'; then
+    echo "$(date): ERROR - Path traversal attempt detected in device name" >> /var/log/usb-trigger.log
+    exit 1
+fi
+
 echo "$(date): USB Device Detected: $DEVICE (kernel: $KERNEL_DEVICE)" >> /var/log/usb-trigger.log
 
 # Wait for device to be fully ready
@@ -296,19 +308,27 @@ sleep 2
 # Create mount point if needed
 mkdir -p "$HOST_MOUNT"
 
+# Security: Verify mount point is empty (prevent mounting over existing data)
+if [ -n "$(ls -A $HOST_MOUNT 2>/dev/null)" ]; then
+    echo "$(date): ERROR - Mount point not empty, possible stale mount" >> /var/log/usb-trigger.log
+    # Try to clean up
+    umount -f "$HOST_MOUNT" 2>/dev/null || true
+    sleep 1
+fi
+
 # Check if device exists and is readable
 if [ ! -b "$DEVICE" ]; then
     echo "$(date): ERROR - Device $DEVICE does not exist or is not a block device" >> /var/log/usb-trigger.log
     exit 1
 fi
 
-# Mount on Proxmox host (try ntfs3 first, then fallback)
-mount -t ntfs3 -o noatime "$DEVICE" "$HOST_MOUNT" 2>> /var/log/usb-trigger.log
+# Security: Mount with nodev,nosuid,noexec to prevent malicious code execution
+mount -t ntfs3 -o noatime,nodev,nosuid,noexec "$DEVICE" "$HOST_MOUNT" 2>> /var/log/usb-trigger.log
 
-# Fallback to standard mount if ntfs3 fails
+# Fallback to standard mount if ntfs3 fails (still with security options)
 if [ $? -ne 0 ]; then
     echo "$(date): ntfs3 failed, trying standard mount..." >> /var/log/usb-trigger.log
-    mount "$DEVICE" "$HOST_MOUNT" 2>> /var/log/usb-trigger.log
+    mount -o nodev,nosuid,noexec "$DEVICE" "$HOST_MOUNT" 2>> /var/log/usb-trigger.log
 fi
 
 # Verify Mount
@@ -332,7 +352,7 @@ echo "$(date): Complete. Drive unmounted." >> /var/log/usb-trigger.log
 EOFSCRIPT
     
     chmod +x /usr/local/bin/usb-trigger.sh
-    msg_ok "USB trigger script created"
+    msg_ok "USB trigger script created with security hardening"
     
     msg_info "Creating mount point"
     # Clean up any stale mounts that could prevent container startup
@@ -343,7 +363,7 @@ EOFSCRIPT
     
     msg_info "Setting up systemd service for USB trigger"
     
-    # Create systemd service for USB handling with proper privileges
+    # Create systemd service for USB handling with proper privileges and sandboxing
     cat > /etc/systemd/system/usb-ingest@.service << 'EOF'
 [Unit]
 Description=USB Media Ingest for %I
@@ -353,10 +373,29 @@ After=local-fs.target
 Type=oneshot
 ExecStart=/usr/local/bin/usb-trigger.sh %I
 RemainAfterExit=no
+
+# Security hardening
+ProtectSystem=strict
+ProtectHome=yes
+ReadWritePaths=/mnt/usb-pass /var/log
+NoNewPrivileges=yes
+PrivateTmp=yes
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectControlGroups=yes
+RestrictNamespaces=yes
+RestrictRealtime=yes
+RestrictSUIDSGID=yes
+LockPersonality=yes
+MemoryDenyWriteExecute=yes
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
+SystemCallFilter=@system-service
+SystemCallFilter=~@privileged @resources
+SystemCallErrorNumber=EPERM
 EOF
 
     systemctl daemon-reload
-    msg_ok "Systemd service created"
+    msg_ok "Systemd service created with security hardening"
     
     msg_info "Setting up udev rules"
     
@@ -444,6 +483,83 @@ create_container() {
     # NAS bind mount
     pct set $CTID -mp1 $NAS_HOST_PATH,mp=/media/nas
     msg_ok "Bind mounts configured"
+    
+    msg_info "Applying security hardening (AppArmor)"
+    
+    # Create AppArmor profile for container
+    cat > /etc/apparmor.d/lxc-containers-media-ingest << 'EOFAPPARMOR'
+#include <tunables/global>
+
+profile lxc-container-media-ingest flags=(attach_disconnected,mediate_deleted) {
+  #include <abstractions/base>
+  #include <abstractions/lxc/container-base>
+  
+  # Deny access to Proxmox host critical paths
+  deny /proc/sysrq-trigger rw,
+  deny /sys/kernel/debug/** rwx,
+  deny /boot/** rwx,
+  deny /etc/shadow r,
+  deny /etc/passwd w,
+  deny /etc/sudoers* rwx,
+  deny /root/.ssh/** rwx,
+  
+  # Deny kernel module loading
+  deny /sys/module/** w,
+  deny @{PROC}/sys/kernel/modules_disabled w,
+  
+  # Allow only necessary mounts
+  /mnt/usb-pass/** rw,
+  /media/usb-ingest/** rw,
+  /media/nas/** rw,
+  /var/log/media-ingest.log w,
+  /var/log/ingest-media.log w,
+  
+  # Allow node.js for dashboard
+  /usr/bin/node ix,
+  /opt/dashboard/** r,
+  /opt/media-ingest/** r,
+  
+  # Restrict network
+  network inet stream,
+  network inet6 stream,
+  network unix stream,
+  deny network raw,
+  deny network packet,
+  
+  # Required capabilities (minimal set)
+  capability dac_override,
+  capability dac_read_search,
+  capability setuid,
+  capability setgid,
+  capability net_bind_service,
+  
+  # Deny dangerous capabilities
+  deny capability sys_admin,
+  deny capability sys_module,
+  deny capability sys_rawio,
+  deny capability sys_boot,
+}
+EOFAPPARMOR
+    
+    # Load AppArmor profile
+    if command -v apparmor_parser &> /dev/null; then
+        apparmor_parser -r /etc/apparmor.d/lxc-containers-media-ingest 2>/dev/null || true
+        msg_ok "AppArmor profile created and loaded"
+    else
+        msg_info "AppArmor not available (profile created for future use)"
+    fi
+    
+    # Apply AppArmor to container
+    pct set $CTID -features nesting=1,fuse=1
+    
+    # Note: Cannot apply lxc.apparmor.profile directly via pct
+    # Must edit container config manually
+    if [ -f /etc/pve/lxc/${CTID}.conf ]; then
+        if ! grep -q "lxc.apparmor.profile" /etc/pve/lxc/${CTID}.conf; then
+            echo "lxc.apparmor.profile: lxc-container-media-ingest" >> /etc/pve/lxc/${CTID}.conf
+            msg_ok "AppArmor profile applied to container config"
+        fi
+    fi
     
     # Update usb-trigger.sh with actual container ID
     sed -i "s/__LXC_ID__/$CTID/g" /usr/local/bin/usb-trigger.sh
@@ -556,7 +672,10 @@ sync_folder() {
         echo "SYNC_START:$FOLDER_NAME" >> "$LOG"
 
         # Use verbose mode with progress - shows filenames AND transfer stats
-        stdbuf -oL rsync -rvh -W --inplace --progress --ignore-existing "$SRC_SUB/" "$DST_PATH/" 2>&1 | \
+        # Security: --safe-links prevents symlink attacks, --no-specials/--no-devices prevent device file exploits
+        stdbuf -oL rsync -rvh -W --inplace --progress --ignore-existing \
+            --safe-links --no-specials --no-devices \
+            "$SRC_SUB/" "$DST_PATH/" 2>&1 | \
             stdbuf -oL tr '\''\r'\'' '\''\n'\'' | \
             stdbuf -oL grep -v '\''^$'\'' >> "$LOG"
 

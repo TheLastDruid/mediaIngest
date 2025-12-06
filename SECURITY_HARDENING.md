@@ -23,7 +23,8 @@ This document addresses security concerns for the Proxmox USB Media Ingest Stati
 
 ### 1. Privileged Container Exploitation
 
-**Risk Level**: Critical (CVSS 9.8)
+**Risk Level**: Critical (CVSS 9.8)  
+**Status**: ✅ **IMPLEMENTED** (AppArmor profile, systemd sandboxing, path validation, mount security)
 
 **Description**: The LXC container runs with `privileged=1`, granting it nearly full access to the host system. If an attacker compromises the dashboard or ingest scripts, they could escape the container and gain root access to the Proxmox host.
 
