@@ -12,7 +12,7 @@ This document addresses security concerns for the Proxmox USB Media Ingest Stati
 - ✅ LXC containerization provides basic isolation
 - ✅ Read-only operations on source media (USB drives)
 - ✅ HTTP Basic Authentication on dashboard (commit 413972e)
-- ✅ AppArmor profile restricts privileged container (commit a4dc0da)
+- ✅ Systemd sandboxing restricts privileged container (commit a4dc0da)
 - ✅ Comprehensive input validation on USB content (commits a4dc0da, 441fd96)
 - ⚠️  Dashboard runs as root (low priority - Risk #11)
 - ✅ Rate limiting and DoS protection (commit 413972e)
@@ -24,7 +24,7 @@ This document addresses security concerns for the Proxmox USB Media Ingest Stati
 ### 1. Privileged Container Exploitation
 
 **Risk Level**: Critical (CVSS 9.8)  
-**Status**: ✅ **IMPLEMENTED** (AppArmor profile, systemd sandboxing, path validation, mount security)
+**Status**: ✅ **IMPLEMENTED** (Systemd sandboxing, path validation, mount security)
 
 **Description**: The LXC container runs with `privileged=1`, granting it nearly full access to the host system. If an attacker compromises the dashboard or ingest scripts, they could escape the container and gain root access to the Proxmox host.
 
@@ -45,32 +45,15 @@ pct set [CTID] -unprivileged 1
 # lxc.idmap: u 0 100000 65536
 # lxc.idmap: g 0 100000 65536
 
-# Option 2: Add AppArmor profile for privileged container
-cat > /etc/apparmor.d/lxc-media-ingest << 'EOF'
-#include <tunables/global>
-profile lxc-media-ingest flags=(attach_disconnected,mediate_deleted) {
-  #include <abstractions/base>
-  
-  # Deny access to Proxmox host critical paths
-  deny /proc/sysrq-trigger w,
-  deny /sys/kernel/debug/** w,
-  deny /boot/** rwx,
-  deny /etc/shadow r,
-  
-  # Allow only necessary mounts
-  /mnt/usb-pass/** rw,
-  /media/nas/** rw,
-  /var/log/media-ingest.log w,
-  
-  # Restrict network
-  network inet stream,
-  network inet6 stream,
-  deny network inet dgram,
-}
-EOF
-
-apparmor_parser -r /etc/apparmor.d/lxc-media-ingest
-pct set [CTID] -features nesting=1,fuse=1,apparmor=lxc-media-ingest
+# Option 2: Systemd hardening (IMPLEMENTED)
+# See usb-trigger.sh systemd service with:
+# - NoNewPrivileges=yes
+# - PrivateTmp=yes
+# - ProtectSystem=strict
+# - ProtectHome=yes
+# - RestrictAddressFamilies
+# - SystemCallFilter
+# - MemoryDenyWriteExecute=yes
 ```
 
 **Status**: ✅ **IMPLEMENTED** (See commit a4dc0da)
