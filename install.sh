@@ -616,9 +616,10 @@ EOF
 validate_filename() {
     local filename="$1"
     
-    # Check for dangerous characters: $, backtick, ;, |, &, <, >, (, ), ..
+    # Check for dangerous characters: $, backtick, ;, |, &, <, >, ..
+    # Note: Parentheses () and brackets [] are safe and common in media filenames
     case "$filename" in
-        *\$*|*\`*|*\;*|*\|*|*\&*|*\<*|*\>*|*\(*|*\)*|*..*) 
+        *\$*|*\`*|*\;*|*\|*|*\&*|*\<*|*\>*|*..*) 
             return 1
             ;;
     esac
