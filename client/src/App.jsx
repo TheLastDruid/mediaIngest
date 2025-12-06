@@ -514,6 +514,7 @@ function SettingsCard({ onAction }) {
 
         {/* Save Button */}
         <button
+          type="button"
           onClick={handleSave}
           disabled={saving || (tmdbEnabled && !tmdbHasApiKey && !tmdbApiKey) || (anilistEnabled && !anilistHasApiKey && !anilistApiKey)}
           className="w-full px-4 py-2 bg-violet-500 hover:bg-violet-600 disabled:bg-slate-700 disabled:text-slate-500 text-white rounded-lg font-medium transition-colors"
