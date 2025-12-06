@@ -595,9 +595,9 @@ echo "\$(date): Checking for suspicious filenames..." >> "\$LOG"
 SUSPICIOUS_COUNT=0
 while IFS= read -r -d "" file; do
     filename=\$(basename "\$file")
-    # Check for shell metacharacters and dangerous patterns (dollar, backtick, semicolon, pipe, ampersand, angle brackets, parens, leading dot)
+    # Check for shell metacharacters and dangerous patterns
     case "\$filename" in
-        *\\\$*|*\\\`*|*\\;*|*\\|*|*\\&*|*\\<*|*\\>*|*\\(*|*\\)*|..*|.*)
+        *\\\\\$*|*\\\\\`*|*\\\\;*|*\\\\|*|*\\\\&*|*\\\\<*|*\\\\>*|*\\\\\(*|*\\\\\)*|..*|.*)
             echo "WARNING: Suspicious filename detected: \$filename" >> "\$LOG"
             SUSPICIOUS_COUNT=\$((SUSPICIOUS_COUNT + 1))
             ;;
