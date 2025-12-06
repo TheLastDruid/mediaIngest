@@ -469,7 +469,8 @@ EOF
 
 ### 10. Race Conditions with Concurrent USB Devices
 
-**Risk Level**: Low (CVSS 2.8)
+**Risk Level**: Low (CVSS 2.8)  
+**Status**: ✅ **IMPLEMENTED** (flock-based exclusive locking on /var/lock/usb-ingest.lock)
 
 **Description**: Multiple USB devices inserted simultaneously could cause race conditions in log files or mount points.
 
@@ -483,7 +484,7 @@ flock -n 200 || { echo "$(date): Another ingest in progress" >> /var/log/usb-tri
 EOF
 ```
 
-**Status**: ⏳ Pending Implementation
+**Status**: ✅ **IMPLEMENTED** (Non-blocking flock with graceful skip message)
 
 ---
 

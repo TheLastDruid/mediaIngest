@@ -281,11 +281,19 @@ KERNEL_DEVICE=$1
 DEVICE="/dev/$KERNEL_DEVICE"
 HOST_MOUNT="/mnt/usb-pass"
 LXC_ID="__LXC_ID__"
+LOCKFILE="/var/lock/usb-ingest.lock"
 
 # Safety Check
 if [ -z "$KERNEL_DEVICE" ]; then 
     echo "$(date): ERROR - No device specified" >> /var/log/usb-trigger.log
     exit 1
+fi
+
+# Security: Acquire exclusive lock to prevent concurrent USB processing
+exec 200>"$LOCKFILE"
+if ! flock -n 200; then
+    echo "$(date): Another USB ingest operation is already in progress, skipping $KERNEL_DEVICE" >> /var/log/usb-trigger.log
+    exit 0
 fi
 
 # Security: Validate kernel device name (must match sd[a-z] or sd[a-z][0-9])
@@ -347,6 +355,9 @@ echo "$(date): Ingest finished. Cleaning up..." >> /var/log/usb-trigger.log
 sync
 sleep 2
 umount "$HOST_MOUNT" 2>/dev/null
+
+# Release lock (automatic on script exit, but explicit for clarity)
+flock -u 200 2>/dev/null || true
 
 echo "$(date): Complete. Drive unmounted." >> /var/log/usb-trigger.log
 EOFSCRIPT
