@@ -76,7 +76,7 @@ CT_CORES=2
 CT_MEMORY=2048
 CT_SWAP=512
 CT_DISK=8
-CT_PASSWORD="mediaingest123"  # Change this if needed
+CT_PASSWORD=$(openssl rand -base64 24 | tr -d '/+=' | cut -c1-24)  # Random 24-char password
 NAS_HOST_PATH="/mnt/pve/media-nas"
 CONTAINER_EXISTS=false
 TEMPLATE=""  # Will be auto-detected
@@ -711,6 +711,30 @@ if [ -n "$USB_SIZE" ] && [ -n "$NAS_FREE" ]; then
     echo "$(date): Disk space check passed - USB: $(numfmt --to=iec "$USB_SIZE") | NAS Free: $(numfmt --to=iec "$NAS_FREE")" >> "$LOG"
 fi
 
+# DoS Protection: Check file count and directory depth
+MAX_FILES=50000
+MAX_DEPTH=10
+
+echo "$(date): Running DoS protection checks..." >> "$LOG"
+
+# Count total files on USB (excluding . and ..)
+FILE_COUNT=$(find "$FOUND_SRC" -type f 2>/dev/null | wc -l)
+if [ "$FILE_COUNT" -gt "$MAX_FILES" ]; then
+    echo "$(date): ERROR - Too many files detected: $FILE_COUNT (max: $MAX_FILES)" >> "$LOG"
+    echo "This may be a malicious USB device attempting a DoS attack." >> "$LOG"
+    exit 1
+fi
+echo "$(date): File count check passed: $FILE_COUNT files" >> "$LOG"
+
+# Check maximum directory depth
+CURRENT_DEPTH=$(find "$FOUND_SRC" -type d -printf '%d\n' 2>/dev/null | sort -rn | head -n 1)
+if [ -n "$CURRENT_DEPTH" ] && [ "$CURRENT_DEPTH" -gt "$MAX_DEPTH" ]; then
+    echo "$(date): ERROR - Directory depth too deep: $CURRENT_DEPTH levels (max: $MAX_DEPTH)" >> "$LOG"
+    echo "This may be a malicious USB device with deeply nested directories." >> "$LOG"
+    exit 1
+fi
+echo "$(date): Directory depth check passed: ${CURRENT_DEPTH:-0} levels" >> "$LOG"
+
 # Check if NAS already has Anime, Movies, and Series folders at root level
 # If all three exist, use NAS root directly (no Media parent folder needed)
 HAS_ANIME=$(find "$DEST_ROOT" -maxdepth 1 -type d -iname "Anime" 2>/dev/null | head -n 1)
@@ -731,7 +755,7 @@ else
     else
         echo "Creating new Media folder on NAS: $DEST_ROOT/Media" >> "$LOG"
         mkdir -p "$DEST_ROOT/Media"
-        chmod 777 "$DEST_ROOT/Media"
+        chmod 755 "$DEST_ROOT/Media"
         DEST_BASE="$DEST_ROOT/Media"
     fi
     USE_DIRECT_STRUCTURE=false
@@ -761,8 +785,9 @@ sync_folder() {
 
         # Use verbose mode with progress - shows filenames AND transfer stats
         # Security: --safe-links prevents symlink attacks, --no-specials/--no-devices prevent device file exploits
+        # DoS Protection: --timeout=7200 (2 hours) prevents indefinite hangs
         stdbuf -oL rsync -rvh -W --inplace --progress --ignore-existing \
-            --safe-links --no-specials --no-devices \
+            --safe-links --no-specials --no-devices --timeout=7200 \
             "$SRC_SUB/" "$DST_PATH/" 2>&1 | \
             stdbuf -oL tr '\''\r'\'' '\''\n'\'' | \
             stdbuf -oL grep -v '\''^$'\'' >> "$LOG"
@@ -893,8 +918,9 @@ show_summary() {
     
     echo -e "\n${BL}LXC Login Credentials:${CL}"
     echo -e "  Username: ${GN}root${CL}"
-    echo -e "  Password: ${GN}mediaingest123${CL}"
+    echo -e "  Password: ${GN}${CT_PASSWORD}${CL}"
     echo -e "  SSH: ${YW}ssh root@$CT_IP${CL}"
+    echo -e "  ${YW}⚠ Save this password - it cannot be recovered!${CL}"
     
     echo -e "\n${BL}Dashboard Access:${CL}"
     echo -e "  URL: ${GN}http://$CT_IP:3000${CL}"
