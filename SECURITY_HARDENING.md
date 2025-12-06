@@ -73,13 +73,14 @@ apparmor_parser -r /etc/apparmor.d/lxc-media-ingest
 pct set [CTID] -features nesting=1,fuse=1,apparmor=lxc-media-ingest
 ```
 
-**Status**: ⏳ Pending Implementation
+**Status**: ✅ **IMPLEMENTED** (See commit a4dc0da)
 
 ---
 
 ### 2. Arbitrary Filesystem Access via Bind Mounts
 
-**Risk Level**: Critical (CVSS 8.9)
+**Risk Level**: Critical (CVSS 8.9)  
+**Status**: ✅ **IMPLEMENTED** (Path validation, mount security, rsync safe options, mount point verification)
 
 **Description**: Bind mounts expose the host filesystem to the container. A malicious USB drive containing symlinks or path traversal sequences could read sensitive host files or overwrite system binaries.
 
@@ -117,7 +118,7 @@ sed -i 's/rsync -rvh/rsync -rvh --safe-links --no-specials --no-devices/' /usr/l
 sed -i 's/mount -t ntfs3 -o noatime/mount -t ntfs3 -o noatime,nodev,nosuid,noexec/' /usr/local/bin/usb-trigger.sh
 ```
 
-**Status**: ⏳ Pending Implementation
+**Status**: ✅ **IMPLEMENTED** (See commit a4dc0da - All mitigation steps already in place)
 
 ---
 
