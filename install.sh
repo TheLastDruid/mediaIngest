@@ -596,7 +596,7 @@ SUSPICIOUS_COUNT=0
 while IFS= read -r -d "" file; do
     filename=$(basename "$file")
     # Check for shell metacharacters and dangerous patterns
-    if echo "$filename" | grep -qE '[\$\`\;\|\&\<\>\(\)]|^\.|\.\.'; then
+    if echo "$filename" | grep -qE '\$|`|;|\||&|<|>|\(|\)|^\.|\.\.'; then
         echo "WARNING: Suspicious filename detected: $filename" >> "$LOG"
         SUSPICIOUS_COUNT=$((SUSPICIOUS_COUNT + 1))
     fi
@@ -719,8 +719,8 @@ sync_folder() {
         stdbuf -oL rsync -rvh -W --inplace --progress --ignore-existing \
             --safe-links --no-specials --no-devices --timeout=7200 \
             "$SRC_SUB/" "$DST_PATH/" 2>&1 | \
-            stdbuf -oL tr '\''\r'\'' '\''\n'\'' | \
-            stdbuf -oL grep -v '\''^$'\'' >> "$LOG"
+            stdbuf -oL tr '"'"'\\r'"'"' '"'"'\\n'"'"' | \
+            stdbuf -oL grep -v '"'"'^$'"'"' >> "$LOG"
 
         echo "SYNC_END:$FOLDER_NAME" >> "$LOG"
     else
