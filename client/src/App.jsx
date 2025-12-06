@@ -2,6 +2,23 @@ import React, { useEffect, useState } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
 import { HardDrive, Activity, CheckCircle, Film, Tv, Database, Zap, XCircle, Server, Power, Clapperboard, Download, X } from 'lucide-react'
 
+// Helper function to get auth headers
+const getAuthHeaders = () => {
+  const password = localStorage.getItem('password')
+  return password ? { 'Authorization': 'Basic ' + btoa('admin:' + password) } : {}
+}
+
+// Helper function to make authenticated fetch requests
+const authFetch = (url, options = {}) => {
+  return fetch(url, {
+    ...options,
+    headers: {
+      ...getAuthHeaders(),
+      ...options.headers
+    }
+  })
+}
+
 // Update Notification Banner
 function UpdateBanner({ version, onDismiss }) {
   const [copied, setCopied] = useState(false)
@@ -123,7 +140,7 @@ function ActiveTransferCard({ current, onAbort }) {
     
     setAborting(true)
     try {
-      const res = await fetch('/api/abort', { method: 'POST' })
+      const res = await authFetch('/api/abort', { method: 'POST' })
       const data = await res.json()
       
       if (data.ok) {
@@ -212,7 +229,7 @@ function DeviceCard({ onAction, deviceName }) {
   const handleAction = async (action, endpoint) => {
     setLoading(action)
     try {
-      const res = await fetch(endpoint, { method: 'POST' })
+      const res = await authFetch(endpoint, { method: 'POST' })
       const data = await res.json()
       
       if (data.ok) {
@@ -297,9 +314,7 @@ function SettingsCard({ onAction }) {
 
   useEffect(() => {
     // Load TMDB config
-    fetch('/api/tmdb/config', {
-      headers: { 'Authorization': 'Basic ' + btoa('admin:' + localStorage.getItem('password')) }
-    })
+    authFetch('/api/tmdb/config')
       .then(res => res.json())
       .then(data => {
         if (data.ok) {
@@ -310,9 +325,7 @@ function SettingsCard({ onAction }) {
       .catch(err => console.error('Failed to load TMDB config:', err));
     
     // Load AniList config
-    fetch('/api/anilist/config', {
-      headers: { 'Authorization': 'Basic ' + btoa('admin:' + localStorage.getItem('password')) }
-    })
+    authFetch('/api/anilist/config')
       .then(res => res.json())
       .then(data => {
         if (data.ok) {
@@ -327,11 +340,10 @@ function SettingsCard({ onAction }) {
     setSaving(true);
     try {
       // Save TMDB config
-      const tmdbRes = await fetch('/api/tmdb/config', {
+      const tmdbRes = await authFetch('/api/tmdb/config', {
         method: 'POST',
         headers: {
-          'Content-Type': 'application/json',
-          'Authorization': 'Basic ' + btoa('admin:' + localStorage.getItem('password'))
+          'Content-Type': 'application/json'
         },
         body: JSON.stringify({
           enabled: tmdbEnabled,
@@ -347,11 +359,10 @@ function SettingsCard({ onAction }) {
       }
       
       // Save AniList config
-      const anilistRes = await fetch('/api/anilist/config', {
+      const anilistRes = await authFetch('/api/anilist/config', {
         method: 'POST',
         headers: {
-          'Content-Type': 'application/json',
-          'Authorization': 'Basic ' + btoa('admin:' + localStorage.getItem('password'))
+          'Content-Type': 'application/json'
         },
         body: JSON.stringify({
           enabled: anilistEnabled,
@@ -766,11 +777,11 @@ export default function App() {
     async function fetchInitialData() {
       try {
         const [historyRes, statsRes, storageRes, versionRes, statusRes] = await Promise.all([
-          fetch('/api/history'),
-          fetch('/api/stats'),
-          fetch('/api/storage'),
+          authFetch('/api/history'),
+          authFetch('/api/stats'),
+          authFetch('/api/storage'),
           fetch('/api/version'),
-          fetch('/api/status')
+          authFetch('/api/status')
         ])
         
         const historyData = await historyRes.json()
@@ -821,17 +832,17 @@ export default function App() {
             setActive(current.filename !== null || current.progress > 0)
             setCurrent(current)
             // Device name comes from separate API call
-            fetch('/api/status').then(r => r.json()).then(data => {
+            authFetch('/api/status').then(r => r.json()).then(data => {
               if (data.ok && data.deviceName && mounted) {
                 setDeviceName(data.deviceName)
               }
             }).catch(() => {})
           } else if (message.type === 'update') {
             // Refresh history and stats when new transfers complete
-            fetch('/api/history').then(r => r.json()).then(data => {
+            authFetch('/api/history').then(r => r.json()).then(data => {
               if (data.ok && mounted) setHistory(data.history || [])
             })
-            fetch('/api/stats').then(r => r.json()).then(data => {
+            authFetch('/api/stats').then(r => r.json()).then(data => {
               if (data.ok && mounted) setStats(data.stats)
             })
           }
@@ -855,7 +866,7 @@ export default function App() {
     // Periodic refresh for storage stats (less frequent)
     const storageInterval = setInterval(() => {
       if (mounted) {
-        fetch('/api/storage').then(r => r.json()).then(data => {
+        authFetch('/api/storage').then(r => r.json()).then(data => {
           if (data.ok && mounted) setStorage(data.storage)
         }).catch(e => console.error('Storage fetch error:', e))
       }
