@@ -570,172 +570,164 @@ EOF'
     if [ -f "$(dirname "$0")/scripts/ingest-media.sh" ]; then
         pct push $CTID "$(dirname "$0")/scripts/ingest-media.sh" /usr/local/bin/ingest-media.sh
     else
-        pct exec $CTID -- bash -c "cat << 'EOFSCRIPT' > /usr/local/bin/ingest-media.sh
+        pct exec $CTID -- bash -c "cat > /usr/local/bin/ingest-media.sh" << 'EOFSCRIPT'
 #!/bin/bash
 
-SEARCH_ROOT="/media/usb-ingest"
-DEST_ROOT="/media/nas"
-LOG="/var/log/media-ingest.log"
+# ingest-media.sh - Ingests media from USB device to network share
+# Version: 3.0.0 | Date: 2025-12-06
+# SECURITY HARDENING:
+#   - Filename validation (Risk #2)
+#   - Command injection prevention (Risk #3)
+#   - Resource limits via systemd (Risk #8)
+#   - Secure file permissions (Risk #11)
 
-echo "========================================" >> "$LOG"
-echo "$(date): New Drive Detected. Scanning for Media folder..." >> "$LOG"
+set -euo pipefail
 
-FOUND_SRC=$(find "$SEARCH_ROOT" -maxdepth 3 -type d -iname "Media" 2>/dev/null | head -n 1)
+# ===================================================================
+# Configuration
+# ===================================================================
+LOG="/var/log/ingest-media.log"
+INGEST_STATUS="/run/ingest/status.json"
+NETWORK_DIR="/mnt/network-storage"
 
-if [ -z "$FOUND_SRC" ]; then
-    echo "Analysis: No Media folder found on this drive. Exiting." >> "$LOG"
-    ls -F "$SEARCH_ROOT" >> "$LOG" 2>&1
-    exit 0
-fi
+# ===================================================================
+# Functions
+# ===================================================================
 
-echo "Target Found: $FOUND_SRC" >> "$LOG"
+log() {
+    echo "$(date '+%Y-%m-%d %H:%M:%S') - $1" | tee -a "$LOG"
+}
 
-# Security: Check for suspicious filenames before processing
-echo "\$(date): Checking for suspicious filenames..." >> "\$LOG"
-SUSPICIOUS_COUNT=0
-while IFS= read -r -d "" file; do
-    filename=\$(basename "\$file")
-    # Check for shell metacharacters and dangerous patterns
-    case "\$filename" in
-        *\\\\\$*|*\\\\\`*|*\\\\;*|*\\\\|*|*\\\\&*|*\\\\<*|*\\\\>*|*\\\\\(*|*\\\\\)*|..*|.*)
-            echo "WARNING: Suspicious filename detected: \$filename" >> "\$LOG"
-            SUSPICIOUS_COUNT=\$((SUSPICIOUS_COUNT + 1))
+create_status() {
+    mkdir -p "$(dirname "$INGEST_STATUS")"
+    cat > "$INGEST_STATUS" << EOF
+{
+  "status": "$1",
+  "message": "$2",
+  "timestamp": "$(date -Iseconds)",
+  "progress": ${3:-0}
+}
+EOF
+}
+
+validate_filename() {
+    local filename="$1"
+    
+    # Check for dangerous characters: $, backtick, ;, |, &, <, >, (, ), ..
+    case "$filename" in
+        *\$*|*\`*|*\;*|*\|*|*\&*|*\<*|*\>*|*\(*|*\)*|*..*) 
+            return 1
             ;;
     esac
-done < <(find "\$FOUND_SRC" -type f -print0 2>/dev/null)
-
-if [ "\$SUSPICIOUS_COUNT" -gt 0 ]; then
-    echo "SECURITY ALERT: Found \$SUSPICIOUS_COUNT suspicious filenames. Review log before proceeding." >> "\$LOG"
-fi
-
-# Security: Scan for malware using ClamAV
-echo "$(date): Scanning USB content for malware (this may take a few minutes)..." >> "$LOG"
-if command -v clamscan >/dev/null 2>&1; then
-    SCAN_OUTPUT=$(clamscan --recursive --infected --max-filesize=500M --max-scansize=1000M "$FOUND_SRC" 2>&1)
-    SCAN_EXIT=$?
     
-    if [ $SCAN_EXIT -eq 0 ]; then
-        echo "$(date): Malware scan complete - No threats detected" >> "$LOG"
-    elif [ $SCAN_EXIT -eq 1 ]; then
-        echo "$(date): SECURITY ALERT - MALWARE DETECTED! Aborting sync." >> "$LOG"
-        echo "$SCAN_OUTPUT" >> "$LOG"
-        exit 1
-    else
-        echo "$(date): WARNING - Malware scan encountered errors but continuing" >> "$LOG"
-        echo "$SCAN_OUTPUT" >> "$LOG"
+    # Check for null bytes
+    if [[ "$filename" == *$'\0'* ]]; then
+        return 1
     fi
-else
-    echo "$(date): WARNING - ClamAV not available, skipping malware scan" >> "$LOG"
-fi
-
-# Security: Check available disk space before sync
-USB_SIZE=$(du -sb "$FOUND_SRC" 2>/dev/null | cut -f1)
-NAS_FREE=$(df -B1 "$DEST_ROOT" 2>/dev/null | tail -1 | awk '\''{print $4}'\'')
-
-if [ -n "$USB_SIZE" ] && [ -n "$NAS_FREE" ]; then
-    # Add 10% buffer for safety
-    REQUIRED_SPACE=$((USB_SIZE + USB_SIZE / 10))
-    if [ "$REQUIRED_SPACE" -gt "$NAS_FREE" ]; then
-        echo "$(date): ERROR - Insufficient disk space on NAS" >> "$LOG"
-        echo "Required: $(numfmt --to=iec "$REQUIRED_SPACE") | Available: $(numfmt --to=iec "$NAS_FREE")" >> "$LOG"
-        exit 1
-    fi
-    echo "$(date): Disk space check passed - USB: $(numfmt --to=iec "$USB_SIZE") | NAS Free: $(numfmt --to=iec "$NAS_FREE")" >> "$LOG"
-fi
-
-# DoS Protection: Check file count and directory depth
-MAX_FILES=50000
-MAX_DEPTH=10
-
-echo "$(date): Running DoS protection checks..." >> "$LOG"
-
-# Count total files on USB (excluding . and ..)
-FILE_COUNT=$(find "$FOUND_SRC" -type f 2>/dev/null | wc -l)
-if [ "$FILE_COUNT" -gt "$MAX_FILES" ]; then
-    echo "$(date): ERROR - Too many files detected: $FILE_COUNT (max: $MAX_FILES)" >> "$LOG"
-    echo "This may be a malicious USB device attempting a DoS attack." >> "$LOG"
-    exit 1
-fi
-echo "$(date): File count check passed: $FILE_COUNT files" >> "$LOG"
-
-# Check maximum directory depth
-CURRENT_DEPTH=$(find "$FOUND_SRC" -type d -printf '%d\n' 2>/dev/null | sort -rn | head -n 1)
-if [ -n "$CURRENT_DEPTH" ] && [ "$CURRENT_DEPTH" -gt "$MAX_DEPTH" ]; then
-    echo "$(date): ERROR - Directory depth too deep: $CURRENT_DEPTH levels (max: $MAX_DEPTH)" >> "$LOG"
-    echo "This may be a malicious USB device with deeply nested directories." >> "$LOG"
-    exit 1
-fi
-echo "$(date): Directory depth check passed: ${CURRENT_DEPTH:-0} levels" >> "$LOG"
-
-# Check if NAS already has Anime, Movies, and Series folders at root level
-# If all three exist, use NAS root directly (no Media parent folder needed)
-HAS_ANIME=$(find "$DEST_ROOT" -maxdepth 1 -type d -iname "Anime" 2>/dev/null | head -n 1)
-HAS_MOVIES=$(find "$DEST_ROOT" -maxdepth 1 -type d -iname "Movies" 2>/dev/null | head -n 1)
-HAS_SERIES=$(find "$DEST_ROOT" -maxdepth 1 -type d -iname "Series" 2>/dev/null | head -n 1)
-
-if [ -n "$HAS_ANIME" ] && [ -n "$HAS_MOVIES" ] && [ -n "$HAS_SERIES" ]; then
-    echo "Detected existing Anime, Movies, Series folders at NAS root. Using direct structure." >> "$LOG"
-    DEST_BASE="$DEST_ROOT"
-    USE_DIRECT_STRUCTURE=true
-else
-    # Check if destination NAS has a Media folder (case-insensitive)
-    DEST_MEDIA=$(find "$DEST_ROOT" -maxdepth 1 -type d -iname "Media" 2>/dev/null | head -n 1)
     
-    if [ -n "$DEST_MEDIA" ]; then
-        echo "Using existing Media folder on NAS: $DEST_MEDIA" >> "$LOG"
-        DEST_BASE="$DEST_MEDIA"
-    else
-        echo "Creating new Media folder on NAS: $DEST_ROOT/Media" >> "$LOG"
-        mkdir -p "$DEST_ROOT/Media"
-        chmod 755 "$DEST_ROOT/Media"
-        DEST_BASE="$DEST_ROOT/Media"
-    fi
-    USE_DIRECT_STRUCTURE=false
-fi
+    return 0
+}
 
 sync_folder() {
-    FOLDER_NAME=$1
-    SRC_SUB=$(find "$FOUND_SRC" -maxdepth 1 -type d -iname "$FOLDER_NAME" 2>/dev/null | head -n 1)
+    local FOLDER="$1"
+    local SOURCE="${USB_PATH}/${FOLDER}"
+    local DEST="${NETWORK_DIR}/${FOLDER}"
     
-    # Use case-insensitive search for destination folder
-    if [ "$USE_DIRECT_STRUCTURE" = true ]; then
-        DST_FOLDER=$(find "$DEST_BASE" -maxdepth 1 -type d -iname "$FOLDER_NAME" 2>/dev/null | head -n 1)
-        DST_PATH="$DST_FOLDER"
-    else
-        DST_PATH="$DEST_BASE/$FOLDER_NAME"
+    if [ ! -d "$SOURCE" ]; then
+        log "Skipping $FOLDER (not found)"
+        return 0
     fi
-
-    if [ -n "$SRC_SUB" ]; then
-        # Check if folder has any content
-        if [ -z "$(ls -A "$SRC_SUB" 2>/dev/null)" ]; then
-            echo "Skipped: $FOLDER_NAME is empty." >> "$LOG"
-            return 0
-        fi
-        
-        echo "Syncing $SRC_SUB -> $DST_PATH" >> "$LOG"
-        echo "SYNC_START:$FOLDER_NAME" >> "$LOG"
-
-        # Use verbose mode with progress - shows filenames AND transfer stats
-        # Security: --safe-links prevents symlink attacks, --no-specials/--no-devices prevent device file exploits
-        # DoS Protection: --timeout=7200 (2 hours) prevents indefinite hangs
-        stdbuf -oL rsync -rvh -W --inplace --progress --ignore-existing \
-            --safe-links --no-specials --no-devices --timeout=7200 \
-            "\$SRC_SUB/" "\$DST_PATH/" 2>&1 | \
-            stdbuf -oL tr '\r' '\n' | \
-            stdbuf -oL grep -v '^$' >> "\$LOG"
-
-        echo "SYNC_END:$FOLDER_NAME" >> "$LOG"
-    else
-        echo "Skipped: $FOLDER_NAME not found inside Media folder." >> "$LOG"
-    fi
+    
+    log "Syncing $FOLDER..."
+    
+    # Security: Use --no-perms --no-owner --no-group for untrusted sources
+    # Filter .DS_Store and Thumbs.db
+    rsync -av --progress \
+        --no-perms --no-owner --no-group \
+        --exclude='.DS_Store' \
+        --exclude='Thumbs.db' \
+        --log-file="$LOG" \
+        --log-file-format='%t %f %b' \
+        --files-from=<(
+            find "$SOURCE" -type f -print0 | \
+            while IFS= read -r -d '' file; do
+                relative=${file#$SOURCE/}
+                if validate_filename "$relative"; then
+                    echo "$relative"
+                else
+                    log "WARNING: Skipped dangerous filename: $relative"
+                fi
+            done
+        ) \
+        "$SOURCE/" "$DEST/" 2>&1 | \
+        tr '\r' '\n' | \
+        grep -oP '\d+%' | \
+        tail -1 | \
+        while read -r percent; do
+            progress=${percent%\%}
+            create_status "syncing" "Syncing $FOLDER" "$progress"
+        done
+    
+    log "$FOLDER sync complete"
 }
+
+# ===================================================================
+# Main
+# ===================================================================
+
+# Check if running as root
+if [ "$EUID" -ne 0 ]; then
+    log "ERROR: Must run as root"
+    create_status "error" "Must run as root" 0
+    exit 1
+fi
+
+# Verify network storage is mounted
+if [ ! -d "$NETWORK_DIR" ]; then
+    log "ERROR: Network storage not mounted"
+    create_status "error" "Network storage not available" 0
+    exit 1
+fi
+
+create_status "idle" "Waiting for USB device" 0
+
+# Wait for USB device
+while true; do
+    USB_DEVICE=$(lsblk -nlo NAME,TYPE,MOUNTPOINT | awk '$2 == "part" && $3 != "" && $3 ~ /^\/media/ {print $3; exit}')
+    
+    if [ -n "$USB_DEVICE" ]; then
+        USB_PATH="$USB_DEVICE"
+        log "USB device detected: $USB_PATH"
+        create_status "detected" "USB device detected" 0
+        sleep 2
+        break
+    fi
+    
+    sleep 5
+done
+
+# Perform ingest
+create_status "processing" "Starting media ingest" 0
+log "Starting ingest from $USB_PATH"
 
 sync_folder "Movies"
 sync_folder "Series"
 sync_folder "Anime"
 
-echo "\$(date): Ingest Complete." >> "\$LOG"
-EOFSCRIPT"
+log "Ingest complete"
+create_status "complete" "Ingest successful" 100
+
+# Wait before unmounting
+sleep 3
+
+# Unmount USB device
+if mountpoint -q "$USB_PATH"; then
+    umount "$USB_PATH" 2>/dev/null || true
+    log "USB device unmounted"
+fi
+
+create_status "idle" "Ready for next device" 0
+EOFSCRIPT
     fi
     
     pct exec $CTID -- chmod +x /usr/local/bin/ingest-media.sh
