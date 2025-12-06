@@ -596,7 +596,7 @@ SUSPICIOUS_COUNT=0
 while IFS= read -r -d "" file; do
     filename=$(basename "$file")
     # Check for shell metacharacters and dangerous patterns
-    if echo "$filename" | grep -qE '\$|`|;|\||&|<|>|\(|\)|^\.|\.\.'; then
+    if echo "$filename" | grep -qE '"'"'[$`;\|&<>()]|^\.|\.\.'"'"'; then
         echo "WARNING: Suspicious filename detected: $filename" >> "$LOG"
         SUSPICIOUS_COUNT=$((SUSPICIOUS_COUNT + 1))
     fi
