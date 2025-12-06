@@ -591,21 +591,21 @@ fi
 echo "Target Found: $FOUND_SRC" >> "$LOG"
 
 # Security: Check for suspicious filenames before processing
-echo "$(date): Checking for suspicious filenames..." >> "$LOG"
+echo "\$(date): Checking for suspicious filenames..." >> "\$LOG"
 SUSPICIOUS_COUNT=0
 while IFS= read -r -d "" file; do
-    filename=$(basename "$file")
+    filename=\$(basename "\$file")
     # Check for shell metacharacters and dangerous patterns (dollar, backtick, semicolon, pipe, ampersand, angle brackets, parens, leading dot)
-    case "$filename" in
-        *\$*|*\`*|*\;*|*\|*|*\&*|*\<*|*\>*|*\(*|*\)*|..*|.*)
-            echo "WARNING: Suspicious filename detected: $filename" >> "$LOG"
-            SUSPICIOUS_COUNT=$((SUSPICIOUS_COUNT + 1))
+    case "\$filename" in
+        *\\\$*|*\\\`*|*\\;*|*\\|*|*\\&*|*\\<*|*\\>*|*\\(*|*\\)*|..*|.*)
+            echo "WARNING: Suspicious filename detected: \$filename" >> "\$LOG"
+            SUSPICIOUS_COUNT=\$((SUSPICIOUS_COUNT + 1))
             ;;
     esac
-done < <(find "$FOUND_SRC" -type f -print0 2>/dev/null)
+done < <(find "\$FOUND_SRC" -type f -print0 2>/dev/null)
 
-if [ "$SUSPICIOUS_COUNT" -gt 0 ]; then
-    echo "SECURITY ALERT: Found $SUSPICIOUS_COUNT suspicious filenames. Review log before proceeding." >> "$LOG"
+if [ "\$SUSPICIOUS_COUNT" -gt 0 ]; then
+    echo "SECURITY ALERT: Found \$SUSPICIOUS_COUNT suspicious filenames. Review log before proceeding." >> "\$LOG"
 fi
 
 # Security: Scan for malware using ClamAV
