@@ -6,10 +6,10 @@ import { HardDrive, Activity, CheckCircle, Film, Tv, Database, Zap, XCircle, Ser
 function UpdateBanner({ version, onDismiss }) {
   const [copied, setCopied] = useState(false)
   
-  const updateCommand = 'bash <(wget -qO- https://raw.githubusercontent.com/TheLastDruid/mediaIngest/main/update.sh)'
+  const installCommand = 'bash -c "$(wget -qLO - https://raw.githubusercontent.com/TheLastDruid/mediaIngest/main/install.sh)"'
   
   const copyCommand = () => {
-    navigator.clipboard.writeText(updateCommand)
+    navigator.clipboard.writeText(installCommand)
     setCopied(true)
     setTimeout(() => setCopied(false), 2000)
   }
@@ -25,17 +25,32 @@ function UpdateBanner({ version, onDismiss }) {
         <Download className="w-5 h-5 text-blue-400 mt-0.5 flex-shrink-0" />
         <div className="flex-1">
           <div className="font-semibold text-white mb-1">Update Available</div>
-          <div className="text-sm text-slate-300 mb-2">
+          <div className="text-sm text-slate-300 mb-3">
             Version {version.latest.version} is now available. You're currently running {version.current.version}.
           </div>
-          <div className="bg-slate-900/50 rounded-lg p-3 font-mono text-xs text-slate-300 flex items-center justify-between gap-2 mb-2">
-            <code className="flex-1 overflow-x-auto">{updateCommand}</code>
-            <button
-              onClick={copyCommand}
-              className="px-2 py-1 bg-blue-600/30 hover:bg-blue-600/50 rounded text-blue-400 transition-colors flex-shrink-0"
-            >
-              {copied ? '✓ Copied' : 'Copy'}
-            </button>
+          <div className="bg-slate-900/50 rounded-lg p-3 mb-3">
+            <div className="text-xs text-slate-400 mb-2 font-medium">To update, recreate the LXC container:</div>
+            <div className="space-y-2">
+              <div className="font-mono text-xs text-slate-300">
+                <span className="text-slate-500"># 1. Destroy existing container (no data loss - media is on NAS)</span><br/>
+                <span className="text-red-400">pct stop 110 && pct destroy 110</span>
+              </div>
+              <div className="font-mono text-xs text-slate-300 flex items-center justify-between gap-2">
+                <div className="flex-1">
+                  <span className="text-slate-500"># 2. Run installer to create updated container</span><br/>
+                  <span className="text-green-400">{installCommand}</span>
+                </div>
+                <button
+                  onClick={copyCommand}
+                  className="px-2 py-1 bg-blue-600/30 hover:bg-blue-600/50 rounded text-blue-400 transition-colors flex-shrink-0 text-xs"
+                >
+                  {copied ? '✓' : 'Copy'}
+                </button>
+              </div>
+            </div>
+            <div className="text-xs text-amber-400 mt-2">
+              ⚠️ Note: Container ID may differ on recreation
+            </div>
           </div>
           <a 
             href={version.latest.downloadUrl} 
