@@ -1,6 +1,6 @@
 {
   "name": "media-ingest-monitor",
-  "version": "1.0.0",
+  "version": "3.0.4",
   "description": "Backend server for Universal Media Ingest monitor",
   "main": "server.js",
   "scripts": {
