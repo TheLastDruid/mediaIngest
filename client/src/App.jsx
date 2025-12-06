@@ -284,9 +284,15 @@ function DeviceCard({ onAction, deviceName }) {
 
 function SettingsCard({ onAction }) {
   const [tmdbEnabled, setTmdbEnabled] = useState(false);
-  const [hasApiKey, setHasApiKey] = useState(false);
-  const [apiKey, setApiKey] = useState('');
-  const [showApiKey, setShowApiKey] = useState(false);
+  const [tmdbHasApiKey, setTmdbHasApiKey] = useState(false);
+  const [tmdbApiKey, setTmdbApiKey] = useState('');
+  const [showTmdbApiKey, setShowTmdbApiKey] = useState(false);
+  
+  const [anilistEnabled, setAnilistEnabled] = useState(false);
+  const [anilistHasApiKey, setAnilistHasApiKey] = useState(false);
+  const [anilistApiKey, setAnilistApiKey] = useState('');
+  const [showAnilistApiKey, setShowAnilistApiKey] = useState(false);
+  
   const [saving, setSaving] = useState(false);
 
   useEffect(() => {
@@ -298,16 +304,30 @@ function SettingsCard({ onAction }) {
       .then(data => {
         if (data.ok) {
           setTmdbEnabled(data.enabled);
-          setHasApiKey(data.hasApiKey);
+          setTmdbHasApiKey(data.hasApiKey);
         }
       })
       .catch(err => console.error('Failed to load TMDB config:', err));
+    
+    // Load AniList config
+    fetch('/api/anilist/config', {
+      headers: { 'Authorization': 'Basic ' + btoa('admin:' + localStorage.getItem('password')) }
+    })
+      .then(res => res.json())
+      .then(data => {
+        if (data.ok) {
+          setAnilistEnabled(data.enabled);
+          setAnilistHasApiKey(data.hasApiKey);
+        }
+      })
+      .catch(err => console.error('Failed to load AniList config:', err));
   }, []);
 
   const handleSave = async () => {
     setSaving(true);
     try {
-      const res = await fetch('/api/tmdb/config', {
+      // Save TMDB config
+      const tmdbRes = await fetch('/api/tmdb/config', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -315,18 +335,41 @@ function SettingsCard({ onAction }) {
         },
         body: JSON.stringify({
           enabled: tmdbEnabled,
-          apiKey: apiKey || undefined
+          apiKey: tmdbApiKey || undefined
         })
       });
       
-      const data = await res.json();
-      if (data.ok) {
-        setHasApiKey(data.hasApiKey);
-        setApiKey('');
-        setShowApiKey(false);
-        onAction({ type: 'success', message: 'TMDB settings saved successfully' });
+      const tmdbData = await tmdbRes.json();
+      if (tmdbData.ok) {
+        setTmdbHasApiKey(tmdbData.hasApiKey);
+        setTmdbApiKey('');
+        setShowTmdbApiKey(false);
+      }
+      
+      // Save AniList config
+      const anilistRes = await fetch('/api/anilist/config', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': 'Basic ' + btoa('admin:' + localStorage.getItem('password'))
+        },
+        body: JSON.stringify({
+          enabled: anilistEnabled,
+          apiKey: anilistApiKey || undefined
+        })
+      });
+      
+      const anilistData = await anilistRes.json();
+      if (anilistData.ok) {
+        setAnilistHasApiKey(anilistData.hasApiKey);
+        setAnilistApiKey('');
+        setShowAnilistApiKey(false);
+      }
+      
+      if (tmdbData.ok && anilistData.ok) {
+        onAction({ type: 'success', message: 'Settings saved successfully' });
       } else {
-        onAction({ type: 'error', message: 'Failed to save settings' });
+        onAction({ type: 'error', message: 'Failed to save some settings' });
       }
     } catch (error) {
       onAction({ type: 'error', message: 'Error saving settings' });
@@ -347,7 +390,7 @@ function SettingsCard({ onAction }) {
         <h3 className="text-lg font-semibold text-white">Settings</h3>
       </div>
 
-      <div className="space-y-4">
+      <div className="space-y-6">
         {/* TMDB Integration */}
         <div className="space-y-3">
           <div className="flex items-center justify-between">
@@ -373,23 +416,23 @@ function SettingsCard({ onAction }) {
             <div className="mt-3 space-y-2 pt-3 border-t border-slate-800">
               <label className="block text-sm text-slate-300">
                 TMDB API Key
-                {!hasApiKey && <span className="text-red-400 ml-1">*</span>}
+                {!tmdbHasApiKey && <span className="text-red-400 ml-1">*</span>}
               </label>
               <div className="flex gap-2">
                 <div className="relative flex-1">
                   <input
-                    type={showApiKey ? 'text' : 'password'}
-                    value={apiKey}
-                    onChange={(e) => setApiKey(e.target.value)}
-                    placeholder={hasApiKey ? '••••••••••••••••' : 'Enter your TMDB API key'}
+                    type={showTmdbApiKey ? 'text' : 'password'}
+                    value={tmdbApiKey}
+                    onChange={(e) => setTmdbApiKey(e.target.value)}
+                    placeholder={tmdbHasApiKey ? '••••••••••••••••' : 'Enter your TMDB API key'}
                     className="w-full px-3 py-2 bg-slate-800/50 border border-slate-700 rounded-lg text-white text-sm focus:outline-none focus:border-violet-500 pr-10"
                   />
                   <button
                     type="button"
-                    onClick={() => setShowApiKey(!showApiKey)}
+                    onClick={() => setShowTmdbApiKey(!showTmdbApiKey)}
                     className="absolute right-2 top-1/2 -translate-y-1/2 text-slate-400 hover:text-white"
                   >
-                    {showApiKey ? '👁️' : '👁️‍🗨️'}
+                    {showTmdbApiKey ? '👁️' : '👁️‍🗨️'}
                   </button>
                 </div>
               </div>
@@ -403,10 +446,65 @@ function SettingsCard({ onAction }) {
           )}
         </div>
 
+        {/* AniList Integration */}
+        <div className="space-y-3">
+          <div className="flex items-center justify-between">
+            <div>
+              <h4 className="text-sm font-medium text-white">AniList Integration</h4>
+              <p className="text-xs text-slate-400 mt-1">
+                Enable anime metadata lookup and proper naming
+              </p>
+            </div>
+            <button
+              onClick={() => setAnilistEnabled(!anilistEnabled)}
+              className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors ${
+                anilistEnabled ? 'bg-emerald-500' : 'bg-slate-700'
+              }`}
+            >
+              <span className={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform ${
+                anilistEnabled ? 'translate-x-6' : 'translate-x-1'
+              }`} />
+            </button>
+          </div>
+
+          {anilistEnabled && (
+            <div className="mt-3 space-y-2 pt-3 border-t border-slate-800">
+              <label className="block text-sm text-slate-300">
+                AniList API Key
+                {!anilistHasApiKey && <span className="text-red-400 ml-1">*</span>}
+              </label>
+              <div className="flex gap-2">
+                <div className="relative flex-1">
+                  <input
+                    type={showAnilistApiKey ? 'text' : 'password'}
+                    value={anilistApiKey}
+                    onChange={(e) => setAnilistApiKey(e.target.value)}
+                    placeholder={anilistHasApiKey ? '••••••••••••••••' : 'Enter your AniList API key'}
+                    className="w-full px-3 py-2 bg-slate-800/50 border border-slate-700 rounded-lg text-white text-sm focus:outline-none focus:border-violet-500 pr-10"
+                  />
+                  <button
+                    type="button"
+                    onClick={() => setShowAnilistApiKey(!showAnilistApiKey)}
+                    className="absolute right-2 top-1/2 -translate-y-1/2 text-slate-400 hover:text-white"
+                  >
+                    {showAnilistApiKey ? '👁️' : '👁️‍🗨️'}
+                  </button>
+                </div>
+              </div>
+              <p className="text-xs text-slate-500">
+                Get your free API key at{' '}
+                <a href="https://anilist.co/settings/developer" target="_blank" rel="noopener noreferrer" className="text-violet-400 hover:underline">
+                  anilist.co/settings/developer
+                </a>
+              </p>
+            </div>
+          )}
+        </div>
+
         {/* Save Button */}
         <button
           onClick={handleSave}
-          disabled={saving || (tmdbEnabled && !hasApiKey && !apiKey)}
+          disabled={saving || (tmdbEnabled && !tmdbHasApiKey && !tmdbApiKey) || (anilistEnabled && !anilistHasApiKey && !anilistApiKey)}
           className="w-full px-4 py-2 bg-violet-500 hover:bg-violet-600 disabled:bg-slate-700 disabled:text-slate-500 text-white rounded-lg font-medium transition-colors"
         >
           {saving ? 'Saving...' : 'Save Settings'}

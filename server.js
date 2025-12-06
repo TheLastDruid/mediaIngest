@@ -10,6 +10,7 @@ const LOG_PATH = '/var/log/media-ingest.log';
 const PROGRESS_LOG_PATH = '/var/log/media-ingest.log'; // Use main log since progress log isn't being populated
 const HISTORY_PATH = path.join(__dirname, 'history.json');
 const TMDB_CONFIG_PATH = path.join(__dirname, 'tmdb-config.json');
+const ANILIST_CONFIG_PATH = path.join(__dirname, 'anilist-config.json');
 const PORT = process.env.PORT || 3000;
 
 const app = express();
@@ -808,6 +809,36 @@ app.post('/api/tmdb/config', authMiddleware, (req, res) => {
     }
     
     fs.writeFileSync(TMDB_CONFIG_PATH, JSON.stringify(config, null, 2));
+    res.json({ ok: true, enabled: config.enabled, hasApiKey: !!config.apiKey });
+  } catch (error) {
+    res.status(500).json({ ok: false, error: error.message });
+  }
+});
+
+// AniList Configuration Endpoints
+app.get('/api/anilist/config', authMiddleware, (req, res) => {
+  try {
+    let config = { enabled: false, apiKey: '' };
+    if (fs.existsSync(ANILIST_CONFIG_PATH)) {
+      config = JSON.parse(fs.readFileSync(ANILIST_CONFIG_PATH, 'utf8'));
+    }
+    // Never send the API key to the client
+    res.json({ ok: true, enabled: config.enabled, hasApiKey: !!config.apiKey });
+  } catch (error) {
+    res.status(500).json({ ok: false, error: error.message });
+  }
+});
+
+app.post('/api/anilist/config', authMiddleware, (req, res) => {
+  try {
+    const { enabled, apiKey } = req.body;
+    let config = { enabled: false, apiKey: '' };
+    if (fs.existsSync(ANILIST_CONFIG_PATH)) {
+      config = JSON.parse(fs.readFileSync(ANILIST_CONFIG_PATH, 'utf8'));
+    }
+    config.enabled = enabled !== undefined ? enabled : config.enabled;
+    if (apiKey !== undefined) config.apiKey = apiKey;
+    fs.writeFileSync(ANILIST_CONFIG_PATH, JSON.stringify(config, null, 2));
     res.json({ ok: true, enabled: config.enabled, hasApiKey: !!config.apiKey });
   } catch (error) {
     res.status(500).json({ ok: false, error: error.message });

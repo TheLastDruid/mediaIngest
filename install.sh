@@ -19,7 +19,7 @@ set -e
 set -o pipefail
 
 # Version information
-INSTALLER_VERSION="3.1.0"
+INSTALLER_VERSION="3.2.0"
 INSTALLER_DATE="2025-12-06"
 
 ################################################################################
@@ -591,6 +591,7 @@ LOG="/var/log/ingest-media.log"
 INGEST_STATUS="/run/ingest/status.json"
 NETWORK_DIR="/media/nas"
 TMDB_CONFIG="/opt/dashboard/tmdb-config.json"
+ANILIST_CONFIG="/opt/dashboard/anilist-config.json"
 
 # ===================================================================
 # Functions
@@ -602,6 +603,16 @@ load_tmdb_config() {
         TMDB_ENABLED=$(grep -o '"enabled":\s*true' "$TMDB_CONFIG" 2>/dev/null)
         TMDB_API_KEY=$(grep -o '"apiKey":\s*"[^"]*"' "$TMDB_CONFIG" 2>/dev/null | cut -d'"' -f4)
         [ -n "$TMDB_ENABLED" ] && [ -n "$TMDB_API_KEY" ] && return 0
+    fi
+    return 1
+}
+
+# Load AniList configuration
+load_anilist_config() {
+    if [ -f "$ANILIST_CONFIG" ]; then
+        ANILIST_ENABLED=$(grep -o '"enabled":\s*true' "$ANILIST_CONFIG" 2>/dev/null)
+        ANILIST_API_KEY=$(grep -o '"apiKey":\s*"[^"]*"' "$ANILIST_CONFIG" 2>/dev/null | cut -d'"' -f4)
+        [ -n "$ANILIST_ENABLED" ] && [ -n "$ANILIST_API_KEY" ] && return 0
     fi
     return 1
 }
@@ -637,6 +648,40 @@ query_tmdb_movie() {
     
     if [ -n "$tmdb_title" ] && [ -n "$tmdb_year" ]; then
         echo "${tmdb_title} (${tmdb_year})|${tmdb_id}"
+    else
+        echo ""
+    fi
+}
+
+# Query AniList for anime information
+query_anilist_anime() {
+    local search_term="$1"
+    
+    # Check if AniList is enabled
+    load_anilist_config || return 1
+    
+    # Clean up search term (remove quality tags, episode markers, etc)
+    search_term=$(echo "$search_term" | sed -E 's/\[.*\]//g' | sed -E 's/S[0-9]+E[0-9]+//g' | sed -E 's/\(.*p\)//g' | xargs)
+    
+    # AniList uses GraphQL
+    local query='query ($search: String) { Media(search: $search, type: ANIME) { title { romaji english } startDate { year } id } }'
+    local variables="{\"search\":\"$search_term\"}"
+    
+    local response=$(curl -s -X POST https://graphql.anilist.co \
+        -H "Content-Type: application/json" \
+        -H "Authorization: Bearer ${ANILIST_API_KEY}" \
+        -d "{\"query\":\"$query\",\"variables\":$variables}" 2>/dev/null)
+    
+    # Extract title (prefer English, fallback to Romaji)
+    local english_title=$(echo "$response" | grep -o '"english":"[^"]*"' | head -1 | cut -d'"' -f4)
+    local romaji_title=$(echo "$response" | grep -o '"romaji":"[^"]*"' | head -1 | cut -d'"' -f4)
+    local year=$(echo "$response" | grep -o '"year":[0-9]*' | head -1 | cut -d':' -f2)
+    local anilist_id=$(echo "$response" | grep -o '"id":[0-9]*' | head -1 | cut -d':' -f2)
+    
+    local title="${english_title:-$romaji_title}"
+    
+    if [ -n "$title" ] && [ -n "$year" ]; then
+        echo "${title} (${year})|${anilist_id}"
     else
         echo ""
     fi
@@ -760,7 +805,57 @@ sync_folder() {
         return 0
     fi
     
-    # For Series/Anime, use original rsync logic
+    # For Anime, check each anime folder for AniList info
+    if [ "$FOLDER" = "Anime" ]; then
+        for anime_dir in "$SOURCE"/*; do
+            [ -d "$anime_dir" ] || continue
+            
+            local anime_name=$(basename "$anime_dir")
+            log "Processing: $anime_name"
+            
+            # Query AniList
+            local anilist_result=$(query_anilist_anime "$anime_name")
+            if [ -n "$anilist_result" ]; then
+                local proper_name=$(echo "$anilist_result" | cut -d'|' -f1)
+                local anilist_id=$(echo "$anilist_result" | cut -d'|' -f2)
+                log "AniList Match: $proper_name (ID: $anilist_id)"
+                
+                # Use proper AniList name for destination
+                local dest_folder="$DEST/$proper_name"
+            else
+                log "AniList: No match found, using original name"
+                local dest_folder="$DEST/$anime_name"
+            fi
+            
+            # Create destination directory
+            mkdir -p "$dest_folder"
+            
+            # Sync anime files
+            rsync -av --progress \
+                --no-perms --no-owner --no-group \
+                --exclude='.DS_Store' \
+                --exclude='Thumbs.db' \
+                --exclude='*.txt' \
+                --exclude='*.nfo' \
+                --exclude='*.jpg' \
+                --exclude='*.png' \
+                "$anime_dir/" "$dest_folder/" 2>&1 | \
+                tr '\r' '\n' | \
+                grep -oP '\\d+%' | \
+                tail -1 | \
+                while read -r percent; do
+                    progress=${percent%\\%}
+                    create_status "syncing" "Syncing: $anime_name" "$progress" "$DEVICE_NAME"
+                done
+            
+            log "Completed: $anime_name"
+        done
+        
+        log "$FOLDER sync complete"
+        return 0
+    fi
+    
+    # For Series, use original rsync logic
     # Security: Use --no-perms --no-owner --no-group for untrusted sources
     # Filter .DS_Store and Thumbs.db
     rsync -av --progress \
