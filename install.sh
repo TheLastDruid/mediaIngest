@@ -19,7 +19,7 @@ set -e
 set -o pipefail
 
 # Version information
-INSTALLER_VERSION="3.0.0"
+INSTALLER_VERSION="3.0.1"
 INSTALLER_DATE="2025-12-06"
 
 ################################################################################
