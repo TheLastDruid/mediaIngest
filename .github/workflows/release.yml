@@ -1,0 +1,195 @@
+name: Build and Release
+
+on:
+  push:
+    tags:
+      - 'v*'  # Triggers on version tags like v3.2.2, v4.0.0, etc.
+
+permissions:
+  contents: write  # Required for creating releases
+
+jobs:
+  build-and-release:
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0  # Full history for changelog generation
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '18'
+          cache: 'npm'
+          cache-dependency-path: |
+            package-lock.json
+            client/package-lock.json
+
+      - name: Extract version from tag
+        id: get_version
+        run: |
+          VERSION=${GITHUB_REF#refs/tags/v}
+          echo "version=$VERSION" >> $GITHUB_OUTPUT
+          echo "tag=${GITHUB_REF#refs/tags/}" >> $GITHUB_OUTPUT
+
+      - name: Install backend dependencies
+        run: npm ci
+
+      - name: Install frontend dependencies
+        working-directory: ./client
+        run: npm ci
+
+      - name: Build React frontend
+        working-directory: ./client
+        run: npm run build
+
+      - name: Update version.json
+        run: |
+          cat > version.json << EOF
+          {
+            "version": "${{ steps.get_version.outputs.version }}",
+            "buildDate": "$(date -u +"%Y-%m-%dT%H:%M:%SZ")",
+            "gitCommit": "${{ github.sha }}",
+            "gitTag": "${{ steps.get_version.outputs.tag }}"
+          }
+          EOF
+
+      - name: Prepare release package
+        run: |
+          mkdir -p release-build
+          
+          # Copy essential files
+          cp install.sh release-build/
+          cp server.js release-build/
+          cp package.json release-build/
+          cp version.json release-build/
+          cp README.md release-build/
+          cp LICENSE release-build/ 2>/dev/null || echo "No LICENSE file found"
+          
+          # Copy scripts directory
+          cp -r scripts release-build/
+          
+          # Copy client with built dist
+          mkdir -p release-build/client
+          cp -r client/dist release-build/client/
+          cp client/package.json release-build/client/
+          cp client/vite.config.js release-build/client/
+          cp client/index.html release-build/client/
+          
+          # Create checksums
+          cd release-build
+          find . -type f -exec sha256sum {} \; > SHA256SUMS
+          cd ..
+
+      - name: Create release archive
+        run: |
+          cd release-build
+          zip -r ../release.zip .
+          cd ..
+          sha256sum release.zip > release.zip.sha256
+
+      - name: Generate release notes
+        id: release_notes
+        run: |
+          cat > release_notes.md << 'EOF'
+          ## 🚀 Media Ingest System ${{ steps.get_version.outputs.tag }}
+          
+          ### 📦 Installation
+          
+          **Quick Install on Proxmox:**
+          ```bash
+          bash -c "$(wget -qLO - https://raw.githubusercontent.com/${{ github.repository }}/main/install.sh)"
+          ```
+          
+          **Or download this release:**
+          ```bash
+          wget https://github.com/${{ github.repository }}/releases/download/${{ steps.get_version.outputs.tag }}/release.zip
+          unzip release.zip -d /opt/media-ingest/
+          ```
+          
+          ### 📋 What's Included
+          
+          - ✅ Pre-built React frontend (optimized production build)
+          - ✅ Express backend server
+          - ✅ Automated installation script
+          - ✅ USB detection scripts with udev rules
+          - ✅ Complete documentation
+          
+          ### 🔍 Verification
+          
+          Verify the integrity of the download:
+          ```bash
+          sha256sum -c release.zip.sha256
+          ```
+          
+          ### 📊 Build Information
+          
+          - **Version:** ${{ steps.get_version.outputs.version }}
+          - **Build Date:** $(date -u +"%Y-%m-%d %H:%M:%S UTC")
+          - **Commit:** ${{ github.sha }}
+          - **Node.js:** 18.x
+          - **React:** 18.2.0
+          - **Vite:** 4.5.0
+          
+          ### 📖 Documentation
+          
+          - [README](https://github.com/${{ github.repository }}/blob/main/README.md)
+          - [Installation Guide](https://github.com/${{ github.repository }}/blob/main/INSTALL.md)
+          - [Troubleshooting](https://github.com/${{ github.repository }}/blob/main/README.md#-troubleshooting)
+          - [Contributing](https://github.com/${{ github.repository }}/blob/main/CONTRIBUTING.md)
+          
+          ### 🐛 Known Issues
+          
+          See [GitHub Issues](https://github.com/${{ github.repository }}/issues) for known issues and workarounds.
+          
+          ### 💬 Support
+          
+          - **Report bugs:** [Issue Tracker](https://github.com/${{ github.repository }}/issues)
+          - **Discussions:** [GitHub Discussions](https://github.com/${{ github.repository }}/discussions)
+          - **Security:** See [SECURITY.md](https://github.com/${{ github.repository }}/blob/main/SECURITY.md)
+          
+          ---
+          
+          **Full Changelog:** https://github.com/${{ github.repository }}/compare/v${{ steps.get_version.outputs.version }}...main
+          EOF
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v1
+        with:
+          files: |
+            release.zip
+            release.zip.sha256
+            release-build/SHA256SUMS
+          body_path: release_notes.md
+          draft: false
+          prerelease: false
+          generate_release_notes: true
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Upload build artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: media-ingest-${{ steps.get_version.outputs.version }}
+          path: release-build/
+          retention-days: 90
+
+      - name: Build summary
+        run: |
+          echo "## 🎉 Release Build Complete" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "**Version:** ${{ steps.get_version.outputs.tag }}" >> $GITHUB_STEP_SUMMARY
+          echo "**Commit:** ${{ github.sha }}" >> $GITHUB_STEP_SUMMARY
+          echo "**Build Date:** $(date -u +"%Y-%m-%d %H:%M:%S UTC")" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "### 📦 Artifacts" >> $GITHUB_STEP_SUMMARY
+          echo "- \`release.zip\` - Complete installation package" >> $GITHUB_STEP_SUMMARY
+          echo "- \`release.zip.sha256\` - Checksum for verification" >> $GITHUB_STEP_SUMMARY
+          echo "- \`SHA256SUMS\` - Individual file checksums" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "### 📊 Package Size" >> $GITHUB_STEP_SUMMARY
+          ls -lh release.zip | awk '{print "- Release Archive: " $5}' >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "🔗 [View Release](https://github.com/${{ github.repository }}/releases/tag/${{ steps.get_version.outputs.tag }})" >> $GITHUB_STEP_SUMMARY

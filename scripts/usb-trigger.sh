@@ -12,13 +12,29 @@ fi
 
 echo "=== USB Device Detected: $DEVICE ==="
 
-# 1. Mount on Proxmox host
-mount -t ntfs3 -o noatime "$DEVICE" "$HOST_MOUNT"
+# 1. Mount on Proxmox host - with dirty mount detection
+echo "Attempting to mount $DEVICE..."
+mount -t ntfs3 -o noatime "$DEVICE" "$HOST_MOUNT" 2>&1
 
-# Fallback if ntfs3 fails
+# Check if mount failed due to dirty filesystem
 if [ $? -ne 0 ]; then
-    echo "ntfs3 failed, trying standard mount..."
-    mount "$DEVICE" "$HOST_MOUNT"
+    echo "Mount failed. Checking if filesystem is dirty..."
+    
+    # Try ntfsfix to repair dirty NTFS filesystem
+    if command -v ntfsfix &> /dev/null; then
+        echo "Running ntfsfix to repair filesystem..."
+        ntfsfix -d "$DEVICE"
+        
+        # Retry mount after ntfsfix
+        echo "Retrying mount after ntfsfix..."
+        mount -t ntfs3 -o noatime "$DEVICE" "$HOST_MOUNT" 2>&1
+    fi
+    
+    # Fallback to standard mount if ntfs3 still fails
+    if [ $? -ne 0 ]; then
+        echo "ntfs3 failed, trying standard mount..."
+        mount "$DEVICE" "$HOST_MOUNT"
+    fi
 fi
 
 # Verify Mount

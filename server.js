@@ -11,17 +11,38 @@ const PROGRESS_LOG_PATH = '/var/log/ingest-media.log'; // Match actual log file 
 const HISTORY_PATH = path.join(__dirname, 'history.json');
 const TMDB_CONFIG_PATH = path.join(__dirname, 'tmdb-config.json');
 const ANILIST_CONFIG_PATH = path.join(__dirname, 'anilist-config.json');
+const JELLYFIN_CONFIG_PATH = path.join(__dirname, 'jellyfin-config.json');
 const PORT = process.env.PORT || 3000;
 
 const app = express();
 
-// Security: CORS - Allow only local network access
+// Security: CORS - Flexible origin configuration
+// Use ALLOWED_ORIGINS env var for custom domains (comma-separated)
+// Falls back to local network only if not set
+const allowedOrigins = process.env.ALLOWED_ORIGINS 
+  ? process.env.ALLOWED_ORIGINS.split(',').map(o => o.trim())
+  : [];
+
 app.use(cors({
   origin: function(origin, callback) {
     // Allow requests with no origin (like mobile apps or curl requests)
     if (!origin) return callback(null, true);
     
-    // Allow localhost and local network (192.168.x.x, 10.x.x.x, 172.16-31.x.x)
+    // If ALLOWED_ORIGINS is set, use those domains
+    if (allowedOrigins.length > 0) {
+      const isAllowed = allowedOrigins.some(allowed => {
+        // Support wildcards like *.mydomain.com
+        if (allowed.includes('*')) {
+          const pattern = new RegExp('^' + allowed.replace(/\./g, '\\.').replace(/\*/g, '.*') + '$');
+          return pattern.test(origin);
+        }
+        return origin === allowed || origin.startsWith(allowed);
+      });
+      
+      return callback(null, isAllowed);
+    }
+    
+    // Fallback: Allow localhost and local network (192.168.x.x, 10.x.x.x, 172.16-31.x.x)
     const localPatterns = [
       /^http:\/\/localhost(:\d+)?$/,
       /^http:\/\/127\.0\.0\.1(:\d+)?$/,
@@ -419,71 +440,104 @@ function parseCurrentTransferFromMainLog(logLines) {
   return { filename: currentFilename, progress, speed, timeRemaining, size };
 }
 
-// Watch log file and update history (only process new lines)
+// Watch log file and update history using native fs.watch (Inotify)
 let lastFileSize = 0;
 let lastPosition = 0;
 let sseClients = []; // Store SSE connections
+let debounceTimer = null;
 
-function watchLogFile() {
-  setInterval(() => {
-    fs.stat(LOG_PATH, (err, stats) => {
-      if (err) return;
+function processLogFileChanges() {
+  fs.stat(LOG_PATH, (err, stats) => {
+    if (err) return;
+    
+    // Only process if file has grown
+    if (stats.size > lastFileSize) {
+      const stream = fs.createReadStream(LOG_PATH, {
+        start: lastPosition,
+        encoding: 'utf8'
+      });
       
-      // Only process if file has grown
-      if (stats.size > lastFileSize) {
-        const stream = fs.createReadStream(LOG_PATH, {
-          start: lastPosition,
-          encoding: 'utf8'
-        });
+      let buffer = '';
+      
+      stream.on('data', (chunk) => {
+        buffer += chunk;
+      });
+      
+      stream.on('end', () => {
+        const newLines = buffer.split(/\r?\n/)
+          .filter(line => line.trim())
+          .map(line => validateLogLine(line))
+          .filter(line => line !== null);
+        const completed = parseNewCompletedTransfers(newLines);
         
-        let buffer = '';
-        
-        stream.on('data', (chunk) => {
-          buffer += chunk;
-        });
-        
-        stream.on('end', () => {
-          const newLines = buffer.split(/\r?\n/)
-            .filter(line => line.trim())
-            .map(line => validateLogLine(line))
-            .filter(line => line !== null);
-          const completed = parseNewCompletedTransfers(newLines);
+        if (completed.length > 0) {
+          const history = readHistory();
           
-          if (completed.length > 0) {
-            const history = readHistory();
+          completed.forEach(transfer => {
+            // Only add if not duplicate (check last 10 entries)
+            const isDuplicate = history.transfers.slice(-10).some(t => 
+              t.filename === transfer.filename
+            );
             
-            completed.forEach(transfer => {
-              // Only add if not duplicate (check last 10 entries)
-              const isDuplicate = history.transfers.slice(-10).some(t => 
-                t.filename === transfer.filename
-              );
-              
-              if (!isDuplicate) {
-                history.transfers.push(transfer);
-              }
-            });
-            
-            // Keep only last 100 transfers
-            if (history.transfers.length > 100) {
-              history.transfers = history.transfers.slice(-100);
+            if (!isDuplicate) {
+              history.transfers.push(transfer);
             }
-            
-            writeHistory(history);
-            
-            // Broadcast update to all SSE clients
-            broadcastSSE({ type: 'update', data: { completed } });
+          });
+          
+          // Keep only last 100 transfers
+          if (history.transfers.length > 100) {
+            history.transfers = history.transfers.slice(-100);
           }
           
-          lastPosition = stats.size;
-          lastFileSize = stats.size;
-        });
-      } else if (stats.size < lastFileSize) {
-        // Log was rotated/cleared, reset position
-        lastPosition = 0;
+          writeHistory(history);
+          
+          // Broadcast update to all SSE clients
+          broadcastSSE({ type: 'update', data: { completed } });
+        }
+        
+        // Broadcast status update for real-time progress
+        const current = parseCurrentTransfer();
+        broadcastSSE({ type: 'status', data: current });
+        
+        lastPosition = stats.size;
         lastFileSize = stats.size;
-      }
-    });
-  }, 1000); // Check every 1 second for faster response
+      });
+    } else if (stats.size < lastFileSize) {
+      // Log was rotated/cleared, reset position
+      lastPosition = 0;
+      lastFileSize = stats.size;
+    }
+  });
+}
+
+function watchLogFile() {
+  // Initialize file size
+  try {
+    const stats = fs.statSync(LOG_PATH);
+    lastFileSize = stats.size;
+    lastPosition = stats.size;
+  } catch (err) {
+    console.log('Log file not found yet, waiting...');
+  }
+  
+  // Use fs.watch for native Inotify support (instant notifications)
+  const watcher = fs.watch(LOG_PATH, (eventType, filename) => {
+    if (eventType === 'change') {
+      // Debounce: wait 50ms after last change to prevent flooding
+      clearTimeout(debounceTimer);
+      debounceTimer = setTimeout(() => {
+        processLogFileChanges();
+      }, 50);
+    }
+  });
+  
+  watcher.on('error', (error) => {
+    console.error('Log watcher error:', error);
+    // Retry after 5 seconds
+    setTimeout(() => watchLogFile(), 5000);
+  });
+  
+  console.log('Watching log file with native Inotify...');
 }
 
 // Broadcast to all SSE clients
@@ -603,11 +657,12 @@ app.get('/api/version', async (req, res) => {
   }
 });
 
-// API: Server-Sent Events for real-time updates
+// API: Server-Sent Events for real-time updates (driven by fs.watch)
 app.get('/api/stream', (req, res) => {
   res.setHeader('Content-Type', 'text/event-stream');
   res.setHeader('Cache-Control', 'no-cache');
   res.setHeader('Connection', 'keep-alive');
+  res.setHeader('X-Accel-Buffering', 'no'); // Disable nginx buffering
   
   // Send initial connection message
   res.write(`data: ${JSON.stringify({ type: 'connected' })}\n\n`);
@@ -619,15 +674,14 @@ app.get('/api/stream', (req, res) => {
   const current = parseCurrentTransfer();
   res.write(`data: ${JSON.stringify({ type: 'status', data: current })}\n\n`);
   
-  // Send status updates every 500ms while connected
-  const intervalId = setInterval(() => {
-    const current = parseCurrentTransfer();
-    res.write(`data: ${JSON.stringify({ type: 'status', data: current })}\n\n`);
-  }, 500);
+  // Keep-alive ping every 15 seconds to prevent connection timeout
+  const keepAliveId = setInterval(() => {
+    res.write(`:ping\n\n`);
+  }, 15000);
   
   // Remove client on disconnect
   req.on('close', () => {
-    clearInterval(intervalId);
+    clearInterval(keepAliveId);
     sseClients = sseClients.filter(client => client !== res);
   });
 });
@@ -749,31 +803,71 @@ app.post('/api/eject', (req, res) => {
 });
 
 // Scan Jellyfin library
-app.post('/api/scan', (req, res) => {
-  // Option 1: Create a trigger file that your Jellyfin scan script monitors
-  exec('touch /tmp/jellyfin-scan-trigger', (err) => {
-    if (err) {
-      return res.json({ ok: false, error: 'Failed to trigger library scan' });
+app.post('/api/scan', async (req, res) => {
+  const JELLYFIN_URL = process.env.JELLYFIN_URL;
+  const JELLYFIN_API_KEY = process.env.JELLYFIN_API_KEY;
+  
+  // If Jellyfin config is available, use the API directly
+  if (JELLYFIN_URL && JELLYFIN_API_KEY) {
+    try {
+      const https = require('https');
+      const http = require('http');
+      const url = require('url');
+      
+      const parsedUrl = new url.URL(`${JELLYFIN_URL}/Library/Refresh`);
+      const protocol = parsedUrl.protocol === 'https:' ? https : http;
+      
+      const options = {
+        hostname: parsedUrl.hostname,
+        port: parsedUrl.port || (parsedUrl.protocol === 'https:' ? 443 : 80),
+        path: parsedUrl.pathname,
+        method: 'POST',
+        headers: {
+          'X-Emby-Token': JELLYFIN_API_KEY,
+          'Content-Type': 'application/json'
+        },
+        timeout: 10000
+      };
+      
+      const apiRequest = protocol.request(options, (response) => {
+        let data = '';
+        response.on('data', chunk => data += chunk);
+        response.on('end', () => {
+          if (response.statusCode >= 200 && response.statusCode < 300) {
+            res.json({ ok: true, message: 'Jellyfin library scan initiated' });
+          } else {
+            res.json({ ok: false, error: `Jellyfin API returned ${response.statusCode}` });
+          }
+        });
+      });
+      
+      apiRequest.on('error', (error) => {
+        console.error('Jellyfin API error:', error);
+        res.json({ ok: false, error: 'Failed to connect to Jellyfin API' });
+      });
+      
+      apiRequest.on('timeout', () => {
+        apiRequest.destroy();
+        res.json({ ok: false, error: 'Jellyfin API request timeout' });
+      });
+      
+      apiRequest.end();
+    } catch (error) {
+      console.error('Jellyfin scan error:', error);
+      res.json({ ok: false, error: error.message });
     }
-    res.json({ ok: true, message: 'Library scan triggered' });
-  });
-  
-  // Option 2: If you have Jellyfin API configured, uncomment this:
-  /*
-  const JELLYFIN_URL = process.env.JELLYFIN_URL || 'http://localhost:8096';
-  const JELLYFIN_API_KEY = process.env.JELLYFIN_API_KEY || '';
-  
-  if (!JELLYFIN_API_KEY) {
-    return res.json({ ok: true, message: 'Scan trigger created (configure JELLYFIN_API_KEY for direct scan)' });
+  } else {
+    // Fallback: Create a trigger file for external monitoring
+    exec('touch /tmp/jellyfin-scan-trigger', (err) => {
+      if (err) {
+        return res.json({ ok: false, error: 'Failed to trigger library scan' });
+      }
+      res.json({ 
+        ok: true, 
+        message: 'Scan trigger created (configure JELLYFIN_URL and JELLYFIN_API_KEY for direct API access)' 
+      });
+    });
   }
-  
-  exec(`curl -s -X POST "${JELLYFIN_URL}/Library/Refresh" -H "X-Emby-Token: ${JELLYFIN_API_KEY}"`, (err, stdout, stderr) => {
-    if (err) {
-      return res.json({ ok: false, error: 'Failed to trigger library scan' });
-    }
-    res.json({ ok: true, message: 'Library scan initiated' });
-  });
-  */
 });
 
 // TMDB Configuration endpoints
@@ -840,6 +934,45 @@ app.post('/api/anilist/config', authMiddleware, (req, res) => {
     if (apiKey !== undefined) config.apiKey = apiKey;
     fs.writeFileSync(ANILIST_CONFIG_PATH, JSON.stringify(config, null, 2));
     res.json({ ok: true, enabled: config.enabled, hasApiKey: !!config.apiKey });
+  } catch (error) {
+    res.status(500).json({ ok: false, error: error.message });
+  }
+});
+
+// Jellyfin Configuration Endpoints
+app.get('/api/jellyfin/config', authMiddleware, (req, res) => {
+  try {
+    let config = { enabled: false, url: '', token: '' };
+    if (fs.existsSync(JELLYFIN_CONFIG_PATH)) {
+      config = JSON.parse(fs.readFileSync(JELLYFIN_CONFIG_PATH, 'utf8'));
+    }
+    // Never send sensitive data to the client
+    res.json({ 
+      ok: true, 
+      enabled: config.enabled, 
+      hasConfig: !!(config.url && config.token) 
+    });
+  } catch (error) {
+    res.status(500).json({ ok: false, error: error.message });
+  }
+});
+
+app.post('/api/jellyfin/config', authMiddleware, (req, res) => {
+  try {
+    const { enabled, url, token } = req.body;
+    let config = { enabled: false, url: '', token: '' };
+    if (fs.existsSync(JELLYFIN_CONFIG_PATH)) {
+      config = JSON.parse(fs.readFileSync(JELLYFIN_CONFIG_PATH, 'utf8'));
+    }
+    config.enabled = enabled !== undefined ? enabled : config.enabled;
+    if (url !== undefined) config.url = url;
+    if (token !== undefined) config.token = token;
+    fs.writeFileSync(JELLYFIN_CONFIG_PATH, JSON.stringify(config, null, 2));
+    res.json({ 
+      ok: true, 
+      enabled: config.enabled, 
+      hasConfig: !!(config.url && config.token) 
+    });
   } catch (error) {
     res.status(500).json({ ok: false, error: error.message });
   }

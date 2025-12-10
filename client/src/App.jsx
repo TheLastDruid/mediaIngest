@@ -20,8 +20,14 @@ const authFetch = (url, options = {}) => {
 }
 
 // Update Notification Banner
+// Only renders if version check succeeded and update is available
 function UpdateBanner({ version, onDismiss }) {
   const [copied, setCopied] = useState(false)
+  
+  // Don't render if version data is missing or incomplete
+  if (!version || !version.latest || !version.current) {
+    return null
+  }
   
   const installCommand = 'bash -c "$(wget -qLO - https://raw.githubusercontent.com/TheLastDruid/mediaIngest/main/install.sh)"'
   
@@ -69,14 +75,16 @@ function UpdateBanner({ version, onDismiss }) {
               ⚠️ Note: Container ID may differ on recreation
             </div>
           </div>
-          <a 
-            href={version.latest.downloadUrl} 
-            target="_blank" 
-            rel="noopener noreferrer"
-            className="inline-block text-blue-400 hover:text-blue-300 text-sm font-medium underline"
-          >
-            View Release Notes →
-          </a>
+          {version.latest.downloadUrl && (
+            <a 
+              href={version.latest.downloadUrl} 
+              target="_blank" 
+              rel="noopener noreferrer"
+              className="inline-block text-blue-400 hover:text-blue-300 text-sm font-medium underline"
+            >
+              View Release Notes →
+            </a>
+          )}
         </div>
       </div>
       <button
@@ -109,6 +117,36 @@ function StatusBadge({ active }) {
       </span>
     </div>
   )
+}
+
+// Simple throttle using requestAnimationFrame
+function useThrottledUpdater() {
+  const rafRef = React.useRef(null)
+  const pendingUpdateRef = React.useRef(null)
+  
+  const scheduleUpdate = React.useCallback((updateFn) => {
+    pendingUpdateRef.current = updateFn
+    
+    if (!rafRef.current) {
+      rafRef.current = requestAnimationFrame(() => {
+        if (pendingUpdateRef.current) {
+          pendingUpdateRef.current()
+          pendingUpdateRef.current = null
+        }
+        rafRef.current = null
+      })
+    }
+  }, [])
+  
+  React.useEffect(() => {
+    return () => {
+      if (rafRef.current) {
+        cancelAnimationFrame(rafRef.current)
+      }
+    }
+  }, [])
+  
+  return scheduleUpdate
 }
 
 // Compact Status Bar for Idle State
@@ -310,6 +348,12 @@ function SettingsCard({ onAction }) {
   const [anilistApiKey, setAnilistApiKey] = useState('');
   const [showAnilistApiKey, setShowAnilistApiKey] = useState(false);
   
+  const [jellyfinEnabled, setJellyfinEnabled] = useState(false);
+  const [jellyfinHasConfig, setJellyfinHasConfig] = useState(false);
+  const [jellyfinUrl, setJellyfinUrl] = useState('');
+  const [jellyfinToken, setJellyfinToken] = useState('');
+  const [showJellyfinToken, setShowJellyfinToken] = useState(false);
+  
   const [saving, setSaving] = useState(false);
 
   useEffect(() => {
@@ -334,6 +378,17 @@ function SettingsCard({ onAction }) {
         }
       })
       .catch(err => console.error('Failed to load AniList config:', err));
+    
+    // Load Jellyfin config
+    authFetch('/api/jellyfin/config')
+      .then(res => res.json())
+      .then(data => {
+        if (data.ok) {
+          setJellyfinEnabled(data.enabled);
+          setJellyfinHasConfig(data.hasConfig);
+        }
+      })
+      .catch(err => console.error('Failed to load Jellyfin config:', err));
   }, []);
 
   const handleSave = async () => {
@@ -377,7 +432,28 @@ function SettingsCard({ onAction }) {
         setShowAnilistApiKey(false);
       }
       
-      if (tmdbData.ok && anilistData.ok) {
+      // Save Jellyfin config
+      const jellyfinRes = await authFetch('/api/jellyfin/config', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({
+          enabled: jellyfinEnabled,
+          url: jellyfinUrl || undefined,
+          token: jellyfinToken || undefined
+        })
+      });
+      
+      const jellyfinData = await jellyfinRes.json();
+      if (jellyfinData.ok) {
+        setJellyfinHasConfig(jellyfinData.hasConfig);
+        setJellyfinUrl('');
+        setJellyfinToken('');
+        setShowJellyfinToken(false);
+      }
+      
+      if (tmdbData.ok && anilistData.ok && jellyfinData.ok) {
         onAction({ type: 'success', message: 'Settings saved successfully' });
       } else {
         onAction({ type: 'error', message: 'Failed to save some settings' });
@@ -512,11 +588,77 @@ function SettingsCard({ onAction }) {
           )}
         </div>
 
+        {/* Jellyfin Integration */}
+        <div className="space-y-3">
+          <div className="flex items-center justify-between">
+            <div>
+              <h4 className="text-sm font-medium text-white">Jellyfin Integration</h4>
+              <p className="text-xs text-slate-400 mt-1">
+                Enable Jellyfin library scanning after media transfer
+              </p>
+            </div>
+            <button
+              onClick={() => setJellyfinEnabled(!jellyfinEnabled)}
+              className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors ${
+                jellyfinEnabled ? 'bg-emerald-500' : 'bg-slate-700'
+              }`}
+            >
+              <span className={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform ${
+                jellyfinEnabled ? 'translate-x-6' : 'translate-x-1'
+              }`} />
+            </button>
+          </div>
+
+          {jellyfinEnabled && (
+            <div className="mt-3 space-y-3 pt-3 border-t border-slate-800">
+              <div>
+                <label className="block text-sm text-slate-300 mb-2">
+                  Jellyfin URL
+                  {!jellyfinHasConfig && <span className="text-red-400 ml-1">*</span>}
+                </label>
+                <input
+                  type="text"
+                  value={jellyfinUrl}
+                  onChange={(e) => setJellyfinUrl(e.target.value)}
+                  placeholder={jellyfinHasConfig ? 'http://your-jellyfin-server:8096' : 'Enter Jellyfin server URL'}
+                  className="w-full px-3 py-2 bg-slate-800/50 border border-slate-700 rounded-lg text-white text-sm focus:outline-none focus:border-violet-500"
+                />
+              </div>
+              
+              <div>
+                <label className="block text-sm text-slate-300 mb-2">
+                  API Token
+                  {!jellyfinHasConfig && <span className="text-red-400 ml-1">*</span>}
+                </label>
+                <div className="relative">
+                  <input
+                    type={showJellyfinToken ? 'text' : 'password'}
+                    value={jellyfinToken}
+                    onChange={(e) => setJellyfinToken(e.target.value)}
+                    placeholder={jellyfinHasConfig ? '••••••••••••••••' : 'Enter your Jellyfin API token'}
+                    className="w-full px-3 py-2 bg-slate-800/50 border border-slate-700 rounded-lg text-white text-sm focus:outline-none focus:border-violet-500 pr-10"
+                  />
+                  <button
+                    type="button"
+                    onClick={() => setShowJellyfinToken(!showJellyfinToken)}
+                    className="absolute right-2 top-1/2 -translate-y-1/2 text-slate-400 hover:text-white"
+                  >
+                    {showJellyfinToken ? '👁️' : '👁️‍🗨️'}
+                  </button>
+                </div>
+                <p className="text-xs text-slate-500 mt-2">
+                  Generate API token in Jellyfin Dashboard → API Keys
+                </p>
+              </div>
+            </div>
+          )}
+        </div>
+
         {/* Save Button */}
         <button
           type="button"
           onClick={handleSave}
-          disabled={saving || (tmdbEnabled && !tmdbHasApiKey && !tmdbApiKey) || (anilistEnabled && !anilistHasApiKey && !anilistApiKey)}
+          disabled={saving || (tmdbEnabled && !tmdbHasApiKey && !tmdbApiKey) || (anilistEnabled && !anilistHasApiKey && !anilistApiKey) || (jellyfinEnabled && !jellyfinHasConfig && (!jellyfinUrl || !jellyfinToken))}
           className="w-full px-4 py-2 bg-violet-500 hover:bg-violet-600 disabled:bg-slate-700 disabled:text-slate-500 text-white rounded-lg font-medium transition-colors"
         >
           {saving ? 'Saving...' : 'Save Settings'}
@@ -764,6 +906,9 @@ export default function App() {
   const [toast, setToast] = useState(null)
   const [updateInfo, setUpdateInfo] = useState(null)
   const [showUpdateBanner, setShowUpdateBanner] = useState(false)
+  
+  // Throttle SSE updates to prevent UI freezes from high-frequency updates
+  const scheduleUpdate = useThrottledUpdater()
 
   const showToast = (message, isError = false) => {
     setToast({ message, isError })
@@ -829,22 +974,27 @@ export default function App() {
           const message = JSON.parse(event.data)
           
           if (message.type === 'status') {
-            const current = message.data || { filename: null, progress: 0, speed: null, timeRemaining: null, size: null }
-            setActive(current.filename !== null || current.progress > 0)
-            setCurrent(current)
-            // Device name comes from separate API call
-            authFetch('/api/status').then(r => r.json()).then(data => {
-              if (data.ok && data.deviceName && mounted) {
-                setDeviceName(data.deviceName)
-              }
-            }).catch(() => {})
+            // Throttle state updates to prevent UI freezes from high-frequency updates (50+ logs/sec)
+            scheduleUpdate(() => {
+              const current = message.data || { filename: null, progress: 0, speed: null, timeRemaining: null, size: null }
+              setActive(current.filename !== null || current.progress > 0)
+              setCurrent(current)
+              // Device name comes from separate API call
+              authFetch('/api/status').then(r => r.json()).then(data => {
+                if (data.ok && data.deviceName && mounted) {
+                  setDeviceName(data.deviceName)
+                }
+              }).catch(() => {})
+            })
           } else if (message.type === 'update') {
             // Refresh history and stats when new transfers complete
-            authFetch('/api/history').then(r => r.json()).then(data => {
-              if (data.ok && mounted) setHistory(data.history || [])
-            })
-            authFetch('/api/stats').then(r => r.json()).then(data => {
-              if (data.ok && mounted) setStats(data.stats)
+            scheduleUpdate(() => {
+              authFetch('/api/history').then(r => r.json()).then(data => {
+                if (data.ok && mounted) setHistory(data.history || [])
+              })
+              authFetch('/api/stats').then(r => r.json()).then(data => {
+                if (data.ok && mounted) setStats(data.stats)
+              })
             })
           }
         } catch (e) {

@@ -89,6 +89,10 @@ NAS_HOST_PATH="/mnt/pve/media-nas"
 CONTAINER_EXISTS=false
 TEMPLATE=""  # Will be auto-detected
 
+# Repository URL - Override this variable to use a different repository
+# Default: Public GitHub repository (update with your actual public repo)
+REPO_URL="${REPO_URL:-https://github.com/TheLastDruid/mediaIngest.git}"
+
 ################################################################################
 # Validation Functions
 ################################################################################
@@ -518,8 +522,35 @@ create_container() {
     
     msg_info "Starting container"
     pct start $CTID
-    sleep 8
     msg_ok "Container started"
+    
+    # Wait for network connectivity inside the container
+    msg_info "Waiting for container network connectivity"
+    local max_retries=30
+    local retry=0
+    local network_ready=false
+    
+    while [ $retry -lt $max_retries ]; do
+        if pct exec $CTID -- ping -c 1 -W 2 8.8.8.8 >/dev/null 2>&1; then
+            network_ready=true
+            break
+        fi
+        retry=$((retry + 1))
+        sleep 1
+    done
+    
+    if [ "$network_ready" = true ]; then
+        msg_ok "Container network is ready"
+    else
+        msg_error "Container network failed to become ready after ${max_retries} seconds"
+        echo -e "\n${YW}Troubleshooting:${CL}"
+        echo "1. Check container status: pct status $CTID"
+        echo "2. Check network configuration: pct config $CTID | grep net0"
+        echo "3. Manually verify network: pct exec $CTID -- ping -c 4 8.8.8.8"
+        echo "4. Check host network: ip addr show vmbr0"
+        echo ""
+        exit 1
+    fi
 }
 
 ################################################################################
@@ -993,34 +1024,80 @@ deploy_dashboard() {
     pct exec $CTID -- mkdir -p /opt/dashboard
     msg_ok "Directory created"
     
-    # Check if we can clone from git
-    REPO_URL="http://192.168.1.14:3000/spooky/mediaingestDashboard.git"
-    msg_info "Cloning dashboard repository"
+    # Ensure ca-certificates is installed and updated for HTTPS git clones
+    msg_info "Ensuring ca-certificates is installed"
+    pct exec $CTID -- bash -c "DEBIAN_FRONTEND=noninteractive apt-get update -qq && apt-get install -y -qq ca-certificates" >/dev/null 2>&1
+    msg_ok "ca-certificates ready"
     
-    if pct exec $CTID -- bash -c "cd /opt/dashboard && git clone http://192.168.1.14:3000/spooky/mediaingestDashboard.git . 2>/dev/null"; then
-        msg_ok "Repository cloned"
+    # Clone from repository using the configurable REPO_URL
+    msg_info "Cloning dashboard repository from: ${REPO_URL}"
+    
+    if pct exec $CTID -- bash -c "cd /opt/dashboard && git clone '$REPO_URL' . 2>&1" >/tmp/git-clone.log 2>&1; then
+        msg_ok "Repository cloned successfully"
     else
-        msg_warn "Git clone failed, deploying files manually"
+        msg_error "Git clone failed"
+        echo -e "\n${RD}═══════════════════════════════════════════════════════════════${CL}"
+        echo -e "${RD}               Git Clone Failed - Manual Action Required        ${CL}"
+        echo -e "${RD}═══════════════════════════════════════════════════════════════${CL}\n"
         
-        # Deploy server.js
-        if [ -f "$(dirname "$0")/server.js" ]; then
-            pct push $CTID "$(dirname "$0")/server.js" /opt/dashboard/server.js
-            pct push $CTID "$(dirname "$0")/package.json" /opt/dashboard/package.json
-        fi
+        echo -e "${YW}Repository URL:${CL} $REPO_URL\n"
         
-        # Deploy client files
-        if [ -d "$(dirname "$0")/client" ]; then
+        echo -e "${YW}Error Details:${CL}"
+        cat /tmp/git-clone.log 2>/dev/null || echo "No detailed error log available"
+        echo ""
+        
+        echo -e "${YW}Possible Causes:${CL}"
+        echo "  • Repository URL is not publicly accessible"
+        echo "  • Network connectivity issues inside the container"
+        echo "  • Repository requires authentication"
+        echo "  • Invalid repository URL"
+        echo ""
+        
+        echo -e "${YW}Manual Recovery Options:${CL}\n"
+        echo -e "${GN}Option 1:${CL} Clone manually inside the container:"
+        echo "  pct enter $CTID"
+        echo "  cd /opt/dashboard"
+        echo "  git clone <your-repo-url> ."
+        echo ""
+        
+        echo -e "${GN}Option 2:${CL} Copy files from host to container:"
+        echo "  # If you have the files locally:"
+        echo "  pct push $CTID /path/to/server.js /opt/dashboard/server.js"
+        echo "  pct push $CTID /path/to/package.json /opt/dashboard/package.json"
+        echo "  # Repeat for client files..."
+        echo ""
+        
+        echo -e "${GN}Option 3:${CL} Use a different repository URL:"
+        echo "  # Re-run the installer with custom REPO_URL:"
+        echo "  REPO_URL='https://github.com/yourusername/yourrepo.git' bash install.sh"
+        echo ""
+        
+        # Attempt local file deployment if available
+        local script_dir="$(dirname "$0")"
+        if [ -f "$script_dir/server.js" ] && [ -d "$script_dir/client" ]; then
+            msg_warn "Attempting to deploy from local files"
+            
+            # Deploy server files
+            pct push $CTID "$script_dir/server.js" /opt/dashboard/server.js 2>/dev/null || true
+            pct push $CTID "$script_dir/package.json" /opt/dashboard/package.json 2>/dev/null || true
+            
+            # Deploy client files
             pct exec $CTID -- mkdir -p /opt/dashboard/client/src
-            pct push $CTID "$(dirname "$0")/client/package.json" /opt/dashboard/client/package.json
-            pct push $CTID "$(dirname "$0")/client/index.html" /opt/dashboard/client/index.html
-            pct push $CTID "$(dirname "$0")/client/vite.config.js" /opt/dashboard/client/vite.config.js
-            pct push $CTID "$(dirname "$0")/client/tailwind.config.js" /opt/dashboard/client/tailwind.config.js
-            pct push $CTID "$(dirname "$0")/client/postcss.config.js" /opt/dashboard/client/postcss.config.js
-            pct push $CTID "$(dirname "$0")/client/src/App.jsx" /opt/dashboard/client/src/App.jsx
-            pct push $CTID "$(dirname "$0")/client/src/main.jsx" /opt/dashboard/client/src/main.jsx
-            pct push $CTID "$(dirname "$0")/client/src/index.css" /opt/dashboard/client/src/index.css
+            pct push $CTID "$script_dir/client/package.json" /opt/dashboard/client/package.json 2>/dev/null || true
+            pct push $CTID "$script_dir/client/index.html" /opt/dashboard/client/index.html 2>/dev/null || true
+            pct push $CTID "$script_dir/client/vite.config.js" /opt/dashboard/client/vite.config.js 2>/dev/null || true
+            pct push $CTID "$script_dir/client/tailwind.config.js" /opt/dashboard/client/tailwind.config.js 2>/dev/null || true
+            pct push $CTID "$script_dir/client/postcss.config.cjs" /opt/dashboard/client/postcss.config.cjs 2>/dev/null || true
+            pct push $CTID "$script_dir/client/src/App.jsx" /opt/dashboard/client/src/App.jsx 2>/dev/null || true
+            pct push $CTID "$script_dir/client/src/main.jsx" /opt/dashboard/client/src/main.jsx 2>/dev/null || true
+            pct push $CTID "$script_dir/client/src/index.css" /opt/dashboard/client/src/index.css 2>/dev/null || true
+            
+            msg_ok "Local files deployed as fallback"
+        else
+            echo -e "${RD}No local files available for automatic fallback.${CL}"
+            echo -e "${RD}Please manually deploy the application files.${CL}\n"
+            exit 1
         fi
-        msg_ok "Files deployed manually"
     fi
     
     msg_info "Installing backend dependencies"
