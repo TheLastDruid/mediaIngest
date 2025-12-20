@@ -454,12 +454,12 @@ function SettingsCard({ onAction }) {
       }
       
       if (tmdbData.ok && anilistData.ok && jellyfinData.ok) {
-        onAction({ type: 'success', message: 'Settings saved successfully' });
+        onAction('Settings saved successfully');
       } else {
-        onAction({ type: 'error', message: 'Failed to save some settings' });
+        onAction('Failed to save some settings', true);
       }
     } catch (error) {
-      onAction({ type: 'error', message: 'Error saving settings' });
+      onAction('Error saving settings', true);
     } finally {
       setSaving(false);
     }
